@@ -27,6 +27,13 @@ interface DataRepository {
     fun saveBusinessProfile(profile: BusinessProfile)
     fun getSelectedPrinterAddress(): String?
     fun saveSelectedPrinterAddress(address: String?)
+
+    suspend fun restoreBackup(
+        profile: BusinessProfile,
+        items: List<ItemEntity>,
+        transactions: List<TransactionEntity>,
+        transactionItems: List<TransactionItemEntity>
+    )
 }
 
 class DefaultDataRepository(private val context: Context) : DataRepository {
@@ -138,5 +145,29 @@ class DefaultDataRepository(private val context: Context) : DataRepository {
 
     override fun saveSelectedPrinterAddress(address: String?) {
         prefs.edit().putString("selected_printer_mac", address).apply()
+    }
+
+    override suspend fun restoreBackup(
+        profile: BusinessProfile,
+        items: List<ItemEntity>,
+        transactions: List<TransactionEntity>,
+        transactionItems: List<TransactionItemEntity>
+    ) {
+        db.withTransaction {
+            transactionDao.deleteAllTransactions()
+            itemDao.deleteAllItems()
+            
+            saveBusinessProfile(profile)
+            
+            for (item in items) {
+                itemDao.insertItem(item)
+            }
+            
+            for (txn in transactions) {
+                transactionDao.insertTransaction(txn)
+            }
+            
+            transactionDao.insertTransactionItems(transactionItems)
+        }
     }
 }

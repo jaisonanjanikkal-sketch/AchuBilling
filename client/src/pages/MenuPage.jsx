@@ -3,7 +3,7 @@ import { useToast } from '../components/Toast';
 import { bluetoothPrinter } from '../utils/bluetoothPrinter';
 import PrinterListModal from '../modals/PrinterListModal';
 
-export default function MenuPage({ businessName, onEditProfile, onSeedData, onResetData, onExportData }) {
+export default function MenuPage({ businessName, onEditProfile, onSeedData, onResetData, onExportData, onImportData }) {
   const showToast = useToast();
   const [printerName, setPrinterName] = useState(bluetoothPrinter.getDeviceName());
   const [isListOpen, setIsListOpen] = useState(false);
@@ -34,6 +34,33 @@ export default function MenuPage({ businessName, onEditProfile, onSeedData, onRe
       setTestPrinting(false);
     }
   }, [showToast]);
+
+  const handleImportClick = () => {
+    document.getElementById('import-file-input').click();
+  };
+
+  const handleFileChange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const json = JSON.parse(event.target.result);
+        if (!json.items && !json.transactions && !json.business) {
+          showToast('Invalid backup file structure', 'error');
+          return;
+        }
+        if (window.confirm('Wipe current data and restore from this backup file? This action cannot be undone.')) {
+          onImportData(json);
+        }
+      } catch (err) {
+        showToast('Failed to parse backup JSON file', 'error');
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
 
   return (
     <div className="tab-view">
@@ -138,6 +165,21 @@ export default function MenuPage({ businessName, onEditProfile, onSeedData, onRe
               </div>
               <span className="mi-arrow">›</span>
             </button>
+            <button className="menu-item" onClick={handleImportClick}>
+              <div className="mi-icon" style={{background:'#dbeafe',color:'#2563eb'}}>📥</div>
+              <div className="mi-text">
+                <div className="mi-title">Import Data</div>
+                <div className="mi-desc">Restore database from a JSON backup file</div>
+              </div>
+              <span className="mi-arrow">›</span>
+            </button>
+            <input
+              type="file"
+              id="import-file-input"
+              accept=".json"
+              style={{ display: 'none' }}
+              onChange={handleFileChange}
+            />
             <button className="menu-item" onClick={onResetData}>
               <div className="mi-icon" style={{background:'#fee2e2',color:'#dc2626'}}>🗑️</div>
               <div className="mi-text">

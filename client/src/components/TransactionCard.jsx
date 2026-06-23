@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { bluetoothPrinter } from '../utils/bluetoothPrinter';
 import { useToast } from './Toast';
 import { businessApi } from '../api/api';
+import { shareInvoiceAsImage } from '../utils/shareInvoice';
 
 function formatCurrency(n) {
   return '₹' + Number(n).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
@@ -36,15 +37,13 @@ export default function TransactionCard({ txn, onView, onEdit, onDelete }) {
     }
   }
 
-  function handleShare(e) {
+  async function handleShare(e) {
     e.stopPropagation();
-    if (navigator.share) {
-      navigator.share({
-        title: `Invoice #${txn.id}`,
-        text: `Invoice #${txn.id} Total: ${formatCurrency(txn.total)}`,
-      }).catch(() => {});
-    } else {
-      showToast('Share not supported on this device', 'info');
+    try {
+      const biz = await businessApi.get();
+      await shareInvoiceAsImage(txn, biz, showToast);
+    } catch (err) {
+      showToast('Failed to share invoice', 'error');
     }
   }
 

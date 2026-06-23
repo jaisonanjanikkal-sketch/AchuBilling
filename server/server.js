@@ -198,6 +198,62 @@ app.get('/api/export', (req, res) => {
   }
 });
 
+// POST /api/import — Import all data from JSON backup
+app.post('/api/import', (req, res) => {
+  try {
+    const db = require('./database');
+    const { items, transactions, transactionItems, business } = req.body;
+
+    db.transaction(() => {
+      // 1. Clear existing data
+      db.exec('DELETE FROM transaction_items');
+      db.exec('DELETE FROM transactions');
+      db.exec('DELETE FROM items');
+
+      // 2. Import business profile
+      if (business) {
+        db.prepare('UPDATE business SET name = ?, phone = ?, address = ? WHERE id = 1')
+          .run(business.name || 'My Business', business.phone || '', business.address || '');
+      }
+
+      // 3. Import items
+      if (items && Array.isArray(items)) {
+        const insertItem = db.prepare(
+          'INSERT OR REPLACE INTO items (id, name, category, sale_price, purchase_price, stock) VALUES (?, ?, ?, ?, ?, ?)'
+        );
+        for (const item of items) {
+          insertItem.run(item.id, item.name, item.category, item.sale_price, item.purchase_price, item.stock);
+        }
+      }
+
+      // 4. Import transactions
+      if (transactions && Array.isArray(transactions)) {
+        const insertTxn = db.prepare(
+          'INSERT OR REPLACE INTO transactions (id, type, date, total, balance) VALUES (?, ?, ?, ?, ?)'
+        );
+        for (const txn of transactions) {
+          insertTxn.run(txn.id, txn.type || 'SALE', txn.date, txn.total, txn.balance || 0);
+        }
+      }
+
+      // 5. Import transaction items
+      if (transactionItems && Array.isArray(transactionItems)) {
+        const insertTxnItem = db.prepare(
+          'INSERT OR REPLACE INTO transaction_items (id, transaction_id, item_id, item_name, quantity, rate, amount) VALUES (?, ?, ?, ?, ?, ?, ?)'
+        );
+        for (const ti of transactionItems) {
+          insertTxnItem.run(ti.id, ti.transaction_id, ti.item_id, ti.item_name, ti.quantity, ti.rate, ti.amount);
+        }
+      }
+    })();
+
+    res.json({ message: 'Data imported successfully!' });
+  } catch (err) {
+    console.error('POST /api/import error:', err.message);
+    res.status(500).json({ error: 'Failed to import data: ' + err.message });
+  }
+});
+
 // =============================================================================
 //  SERVE REACT BUILD (Production)
 // =============================================================================

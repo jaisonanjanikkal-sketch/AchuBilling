@@ -137,7 +137,11 @@ fun HistoryScreen(
                     items(txnsList, key = { it.transaction.id }) { txn ->
                         TransactionListItem(
                             txn = txn,
-                            onClick = { selectedTxn = txn }
+                            onClick = { selectedTxn = txn },
+                            onShareClick = {
+                                val profile = viewModel.getBusinessProfile()
+                                InvoiceShareUtility.shareInvoiceAsImage(context, profile, txn)
+                            }
                         )
                     }
                 }
@@ -313,7 +317,8 @@ fun HistoryScreen(
 @Composable
 fun TransactionListItem(
     txn: TransactionWithItems,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onShareClick: () -> Unit
 ) {
     Card(
         modifier = Modifier
@@ -354,6 +359,18 @@ fun TransactionListItem(
                 fontWeight = FontWeight.ExtraBold,
                 color = Color(0xFF16A34A)
             )
+            Spacer(modifier = Modifier.width(8.dp))
+            IconButton(
+                onClick = { onShareClick() },
+                modifier = Modifier.size(24.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Share,
+                    contentDescription = "Share",
+                    tint = Color(0xFF2563EB),
+                    modifier = Modifier.size(16.dp)
+                )
+            }
         }
     }
 }

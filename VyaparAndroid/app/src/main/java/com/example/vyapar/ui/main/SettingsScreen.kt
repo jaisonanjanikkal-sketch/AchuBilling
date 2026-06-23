@@ -29,6 +29,12 @@ import com.example.vyapar.printer.ThermalPrinterManager
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import android.content.Context
+import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import kotlinx.coroutines.flow.first
+import java.io.File
 
 class SettingsViewModel(private val repository: DataRepository) : ViewModel() {
     fun getBusinessProfile(): BusinessProfile = repository.getBusinessProfile()
@@ -96,6 +102,177 @@ class SettingsViewModel(private val repository: DataRepository) : ViewModel() {
             repository.clearAllData()
         }
     }
+
+    fun exportBackup(context: Context, onResult: (Boolean, String) -> Unit) {
+        viewModelScope.launch {
+            try {
+                val items = repository.getItemsFlow().first()
+                val transactionsWithItems = repository.getTransactionsFlow().first()
+                val profile = repository.getBusinessProfile()
+
+                val root = org.json.JSONObject()
+
+                val bizObj = org.json.JSONObject().apply {
+                    put("name", profile.name)
+                    put("phone", profile.phone)
+                    put("address", profile.address)
+                }
+                root.put("business", bizObj)
+
+                val itemsArr = org.json.JSONArray()
+                for (item in items) {
+                    val itemObj = org.json.JSONObject().apply {
+                        put("code", item.code)
+                        put("name", item.name)
+                        put("salePrice", item.salePrice)
+                        put("purchasePrice", item.purchasePrice)
+                        put("stock", item.stock)
+                    }
+                    itemsArr.put(itemObj)
+                }
+                root.put("items", itemsArr)
+
+                val txnsArr = org.json.JSONArray()
+                val lineItemsArr = org.json.JSONArray()
+
+                for (txnWithItems in transactionsWithItems) {
+                    val txn = txnWithItems.transaction
+                    val txnObj = org.json.JSONObject().apply {
+                        put("id", txn.id)
+                        put("date", txn.date)
+                        put("total", txn.total)
+                        put("discount", txn.discount)
+                        put("grandTotal", txn.grandTotal)
+                        put("type", txn.type)
+                    }
+                    txnsArr.put(txnObj)
+
+                    for (item in txnWithItems.items) {
+                        val liObj = org.json.JSONObject().apply {
+                            put("id", item.id)
+                            put("transactionId", item.transactionId)
+                            put("itemCode", item.itemCode)
+                            put("itemName", item.itemName)
+                            put("quantity", item.quantity)
+                            put("rate", item.rate)
+                            put("amount", item.amount)
+                        }
+                        lineItemsArr.put(liObj)
+                    }
+                }
+                root.put("transactions", txnsArr)
+                root.put("transactionItems", lineItemsArr)
+
+                val file = File(context.cacheDir, "vyapar_backup_${System.currentTimeMillis()}.json")
+                file.writeText(root.toString(2))
+
+                val uri = androidx.core.content.FileProvider.getUriForFile(
+                    context,
+                    "${context.packageName}.fileprovider",
+                    file
+                )
+
+                val intent = Intent(Intent.ACTION_SEND).apply {
+                    type = "application/json"
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    clipData = android.content.ClipData.newRawUri("", uri)
+                    putExtra(Intent.EXTRA_SUBJECT, "Vyapar Backup")
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+
+                val chooser = Intent.createChooser(intent, "Share Backup File")
+                chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(chooser)
+
+                onResult(true, "Backup file generated!")
+            } catch (e: Exception) {
+                onResult(false, "Export failed: ${e.message}")
+            }
+        }
+    }
+
+    fun importBackup(context: Context, uri: android.net.Uri, onResult: (Boolean, String) -> Unit) {
+        viewModelScope.launch {
+            try {
+                val jsonString = context.contentResolver.openInputStream(uri)?.use { inputStream ->
+                    inputStream.bufferedReader().use { it.readText() }
+                }
+                if (jsonString == null) {
+                    onResult(false, "Failed to read file contents")
+                    return@launch
+                }
+
+                val root = org.json.JSONObject(jsonString)
+                if (!root.has("items") && !root.has("transactions") && !root.has("business")) {
+                    onResult(false, "Invalid backup file structure")
+                    return@launch
+                }
+
+                val bizProfile = if (root.has("business")) {
+                    val bizObj = root.getJSONObject("business")
+                    BusinessProfile(
+                        name = bizObj.optString("name", "My Business"),
+                        phone = bizObj.optString("phone", ""),
+                        address = bizObj.optString("address", "")
+                    )
+                } else {
+                    BusinessProfile("My Business", "", "")
+                }
+
+                val itemsList = mutableListOf<ItemEntity>()
+                if (root.has("items")) {
+                    val arr = root.getJSONArray("items")
+                    for (i in 0 until arr.length()) {
+                        val obj = arr.getJSONObject(i)
+                        val code = obj.optString("code")
+                        if (code.isNullOrBlank()) continue
+                        val name = obj.optString("name", "")
+                        val salePrice = obj.optDouble("salePrice", obj.optDouble("sale_price", 0.0))
+                        val purchasePrice = obj.optDouble("purchasePrice", obj.optDouble("purchase_price", 0.0))
+                        val stock = obj.optDouble("stock", 0.0)
+                        itemsList.add(ItemEntity(code, name, salePrice, purchasePrice, stock))
+                    }
+                }
+
+                val txnsList = mutableListOf<TransactionEntity>()
+                if (root.has("transactions")) {
+                    val arr = root.getJSONArray("transactions")
+                    for (i in 0 until arr.length()) {
+                        val obj = arr.getJSONObject(i)
+                        val id = obj.optLong("id", 0L)
+                        val date = obj.optLong("date", System.currentTimeMillis())
+                        val total = obj.optDouble("total", 0.0)
+                        val grandTotal = obj.optDouble("grandTotal", obj.optDouble("grand_total", total))
+                        val discount = obj.optDouble("discount", 0.0)
+                        val type = obj.optString("type", "SALE")
+                        txnsList.add(TransactionEntity(id = id, date = date, total = total, grandTotal = grandTotal, discount = discount, type = type))
+                    }
+                }
+
+                val txnItemsList = mutableListOf<TransactionItemEntity>()
+                if (root.has("transactionItems")) {
+                    val arr = root.getJSONArray("transactionItems")
+                    for (i in 0 until arr.length()) {
+                        val obj = arr.getJSONObject(i)
+                        val id = obj.optLong("id", 0L)
+                        val txnId = obj.optLong("transactionId", obj.optLong("transaction_id", 0L))
+                        val itemCode = obj.optString("itemCode", obj.optString("item_code", ""))
+                        val itemName = obj.optString("itemName", obj.optString("item_name", ""))
+                        val quantity = obj.optDouble("quantity", 0.0)
+                        val rate = obj.optDouble("rate", 0.0)
+                        val amount = obj.optDouble("amount", 0.0)
+                        txnItemsList.add(TransactionItemEntity(id = id, transactionId = txnId, itemCode = itemCode, itemName = itemName, quantity = quantity, rate = rate, amount = amount))
+                    }
+                }
+
+                repository.restoreBackup(bizProfile, itemsList, txnsList, txnItemsList)
+                onResult(true, "Backup restored successfully!")
+            } catch (e: Exception) {
+                e.printStackTrace()
+                onResult(false, "Import failed: ${e.message}")
+            }
+        }
+    }
 }
 
 @SuppressLint("MissingPermission")
@@ -107,6 +284,16 @@ fun SettingsScreen(
 ) {
     val context = LocalContext.current
     val printerManager = remember { ThermalPrinterManager(context) }
+
+    val importLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) {
+            viewModel.importBackup(context, uri) { success, message ->
+                Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+            }
+        }
+    }
 
     val businessProfile = remember { viewModel.getBusinessProfile() }
     var bizName by remember { mutableStateOf(businessProfile.name) }
@@ -266,6 +453,32 @@ fun SettingsScreen(
                         shape = RoundedCornerShape(8.dp)
                     ) {
                         Text("📥 Load Demo Data", fontWeight = FontWeight.Bold)
+                    }
+
+                    // Export Backup
+                    Button(
+                        onClick = {
+                            viewModel.exportBackup(context) { success, message ->
+                                if (!success) Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("📤 Export Backup JSON", fontWeight = FontWeight.Bold)
+                    }
+
+                    // Import Backup
+                    Button(
+                        onClick = {
+                            importLauncher.launch("application/json")
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4F46E5)),
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("📥 Import Backup JSON", fontWeight = FontWeight.Bold)
                     }
 
                     // Reset Data

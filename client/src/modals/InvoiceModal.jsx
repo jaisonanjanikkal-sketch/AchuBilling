@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import Modal from '../components/Modal';
 import { transactionsApi, businessApi } from '../api/api';
 import { bluetoothPrinter } from '../utils/bluetoothPrinter';
+import { useToast } from '../components/Toast';
+import { shareInvoiceAsImage } from '../utils/shareInvoice';
 
 function formatCurrency(n) {
   return '₹' + Number(n).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
@@ -17,6 +19,7 @@ function formatTime(iso) {
 }
 
 export default function InvoiceModal({ show, transactionId, onClose }) {
+  const showToast = useToast();
   const [txn, setTxn] = useState(null);
   const [biz, setBiz] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -67,30 +70,7 @@ export default function InvoiceModal({ show, transactionId, onClose }) {
 
   async function handleShare() {
     if (!txn || !biz) return;
-
-    const shareText = buildShareText(txn, biz);
-
-    if (navigator.share) {
-      try {
-        await navigator.share({
-          title: `Invoice #${txn.id} — ${biz.name || 'My Business'}`,
-          text: shareText,
-        });
-      } catch (err) {
-        // User cancelled share
-        if (err.name !== 'AbortError') {
-          console.error('Share error:', err);
-        }
-      }
-    } else {
-      // Fallback: copy to clipboard
-      try {
-        await navigator.clipboard.writeText(shareText);
-        alert('Invoice copied to clipboard!');
-      } catch (err) {
-        console.error('Clipboard error:', err);
-      }
-    }
+    await shareInvoiceAsImage(txn, biz, showToast);
   }
 
   function buildShareText(txn, biz) {

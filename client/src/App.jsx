@@ -147,16 +147,48 @@ export default function App() {
   async function handleExportData() {
     try {
       const data = await dataApi.export();
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const backupText = JSON.stringify(data, null, 2);
+      const fileName = `anjanikkal_backup_${new Date().toISOString().slice(0, 10)}.json`;
+
+      if (navigator.share) {
+        const file = new File([backupText], fileName, { type: 'application/json' });
+        try {
+          await navigator.share({
+            title: 'Anjanikkal Data Backup',
+            files: [file]
+          });
+          showToast('Data backup shared successfully!');
+          return;
+        } catch (err) {
+          if (err.name !== 'AbortError') {
+            console.warn('Share backup failed, falling back to download', err);
+          } else {
+            return; // user cancelled share
+          }
+        }
+      }
+
+      // Fallback: browser download
+      const blob = new Blob([backupText], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `anjanikkal_backup_${new Date().toISOString().slice(0, 10)}.json`;
+      a.download = fileName;
       a.click();
       URL.revokeObjectURL(url);
       showToast('Data exported successfully!');
     } catch (err) {
       showToast(err.message || 'Failed to export data', 'error');
+    }
+  }
+
+  async function handleImportData(jsonData) {
+    try {
+      const res = await dataApi.import(jsonData);
+      showToast(res.message || 'Backup restored successfully!');
+      triggerRefresh();
+    } catch (err) {
+      showToast(err.message || 'Failed to restore backup', 'error');
     }
   }
 
@@ -230,6 +262,7 @@ export default function App() {
                 onSeedData={handleSeedData}
                 onResetData={handleResetData}
                 onExportData={handleExportData}
+                onImportData={handleImportData}
               />
             )}
           </main>

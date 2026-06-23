@@ -32,6 +32,11 @@ import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Share
+import com.example.vyapar.utils.InvoiceShareUtility
+import com.example.vyapar.data.BusinessProfile
 
 // ViewModel and State definitions
 data class DashboardStats(
@@ -91,6 +96,8 @@ class DashboardViewModel(private val repository: DataRepository) : ViewModel() {
             recentTransactions = txns.take(5)
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), DashboardState())
+
+    fun getBusinessProfile(): BusinessProfile = repository.getBusinessProfile()
 }
 
 // UI Composable Screen
@@ -102,6 +109,7 @@ fun DashboardScreen(
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.state.collectAsState()
+    val context = LocalContext.current
 
     Box(modifier = modifier.fillMaxSize()) {
         LazyColumn(
@@ -238,7 +246,14 @@ fun DashboardScreen(
                 }
             } else {
                 items(uiState.recentTransactions) { txn ->
-                    RecentSaleCard(txn, onViewTransaction)
+                    RecentSaleCard(
+                        invoice = txn,
+                        onViewTransaction = onViewTransaction,
+                        onShareClick = { invoice ->
+                            val profile = viewModel.getBusinessProfile()
+                            InvoiceShareUtility.shareInvoiceAsImage(context, profile, invoice)
+                        }
+                    )
                     Spacer(modifier = Modifier.height(8.dp))
                 }
             }
@@ -370,7 +385,8 @@ fun TopItemCard(item: TopSellingItem) {
 @Composable
 fun RecentSaleCard(
     invoice: TransactionWithItems,
-    onViewTransaction: (Long) -> Unit
+    onViewTransaction: (Long) -> Unit,
+    onShareClick: (TransactionWithItems) -> Unit
 ) {
     Card(
         modifier = Modifier
@@ -421,6 +437,18 @@ fun RecentSaleCard(
                 ) {
                     Text(text = "PAID", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFF16A34A))
                 }
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            IconButton(
+                onClick = { onShareClick(invoice) },
+                modifier = Modifier.size(24.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Share,
+                    contentDescription = "Share",
+                    tint = Color(0xFF2563EB),
+                    modifier = Modifier.size(16.dp)
+                )
             }
         }
     }

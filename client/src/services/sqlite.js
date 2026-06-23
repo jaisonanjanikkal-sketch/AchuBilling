@@ -255,3 +255,79 @@ export const sqlBusinessApi = {
     return data;
   }
 };
+
+export const sqlDataApi = {
+  export: async () => {
+    if (!db) throw new Error('Database not connected');
+    const items = (await db.query('SELECT * FROM items')).values || [];
+    const transactions = (await db.query('SELECT * FROM transactions')).values || [];
+    const transactionItems = (await db.query('SELECT * FROM transaction_items')).values || [];
+    const business = (await db.query('SELECT * FROM business WHERE id = 1')).values?.[0] || null;
+    return { items, transactions, transactionItems, business, exportDate: new Date().toISOString() };
+  },
+  import: async (data) => {
+    if (!db) throw new Error('Database not connected');
+    const { items, transactions, transactionItems, business } = data;
+    
+    // Perform operations in order
+    await db.run('DELETE FROM transaction_items');
+    await db.run('DELETE FROM transactions');
+    await db.run('DELETE FROM items');
+    
+    if (business) {
+      await db.run('UPDATE business SET name=?, phone=?, address=? WHERE id=1', [
+        business.name || 'My Business',
+        business.phone || '',
+        business.address || ''
+      ]);
+    }
+    
+    if (items && Array.isArray(items)) {
+      for (const item of items) {
+        await db.run('INSERT OR REPLACE INTO items (id, name, category, sale_price, purchase_price, stock) VALUES (?, ?, ?, ?, ?, ?)',
+          [
+            item.id,
+            item.name,
+            item.category || 'General',
+            item.sale_price !== undefined ? item.sale_price : (item.salePrice || 0),
+            item.purchase_price !== undefined ? item.purchase_price : (item.purchasePrice || 0),
+            item.stock || 0
+          ]
+        );
+      }
+    }
+    
+    if (transactions && Array.isArray(transactions)) {
+      for (const txn of transactions) {
+        await db.run('INSERT OR REPLACE INTO transactions (id, type, date, total, balance) VALUES (?, ?, ?, ?, ?)',
+          [
+            txn.id,
+            txn.type || 'SALE',
+            txn.date,
+            txn.total || 0,
+            txn.balance || 0
+          ]
+        );
+      }
+    }
+    
+    if (transactionItems && Array.isArray(transactionItems)) {
+      for (const ti of transactionItems) {
+        await db.run('INSERT OR REPLACE INTO transaction_items (id, transaction_id, item_id, item_name, quantity, rate, amount) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          [
+            ti.id,
+            ti.transaction_id || ti.transactionId,
+            ti.item_id !== undefined ? ti.item_id : (ti.itemId || 0),
+            ti.item_name || ti.itemName,
+            ti.quantity || 1,
+            ti.rate || 0,
+            ti.amount || 0
+          ]
+        );
+      }
+    }
+    
+    return { message: 'Data imported successfully!' };
+  }
+};
+

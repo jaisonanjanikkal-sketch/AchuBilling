@@ -1,5 +1,5 @@
 import { Capacitor } from '@capacitor/core';
-import { sqlItemsApi, sqlTransactionsApi, sqlBusinessApi } from '../services/sqlite';
+import { sqlItemsApi, sqlTransactionsApi, sqlBusinessApi, sqlDataApi } from '../services/sqlite';
 
 // =============================================================================
 //  API MODULE — Centralized fetch wrapper for all backend endpoints
@@ -80,8 +80,14 @@ export const dataApi = {
   },
   export: async () => {
     if (isNative) {
-      throw new Error('Export is not fully implemented in SQLite mode yet');
+      return sqlDataApi.export();
     }
     return request('/export');
+  },
+  import: async (data) => {
+    if (isNative) {
+      return sqlDataApi.import(data);
+    }
+    return request('/import', { method: 'POST', body: data });
   },
 };
