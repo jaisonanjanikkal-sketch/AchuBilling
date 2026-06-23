@@ -3,7 +3,9 @@ plugins {
   alias(libs.plugins.kotlin.android)
   alias(libs.plugins.compose.compiler)
   alias(libs.plugins.kotlin.serialization)
+  alias(libs.plugins.ksp)
 }
+
 
 android {
     namespace = "com.example.vyapar"
@@ -77,4 +79,13 @@ dependencies {
 
   // Navigation
   implementation(libs.androidx.navigation.compose)
+
+  // Room
+  implementation(libs.room.runtime)
+  implementation(libs.room.ktx)
+  ksp(libs.room.compiler)
+
+  // Serialization
+  implementation(libs.kotlinx.serialization.json)
 }
+
