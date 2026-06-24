@@ -295,10 +295,17 @@ fun HomeScreen(
                             val printerMac = viewModel.getSelectedPrinterAddress()
                             if (printerMac.isNullOrBlank()) {
                                 Toast.makeText(context, "Printer not connected. Go to Settings to link printer.", Toast.LENGTH_SHORT).show()
+                            } else if (!printerManager.hasBluetoothPermission()) {
+                                Toast.makeText(context, "Bluetooth permissions are required for printing.", Toast.LENGTH_LONG).show()
                             } else {
-                                Toast.makeText(context, "Printing...", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "Connecting to printer...", Toast.LENGTH_SHORT).show()
                                 viewModel.viewModelScope.launch {
-                                    printerManager.printInvoice(printerMac, viewModel.getBusinessProfile(), txn)
+                                    val printResult = printerManager.printInvoice(printerMac, viewModel.getBusinessProfile(), txn)
+                                    if (printResult.isSuccess) {
+                                        Toast.makeText(context, "Printed successfully!", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        Toast.makeText(context, "Print failed: ${printResult.exceptionOrNull()?.message}", Toast.LENGTH_LONG).show()
+                                    }
                                 }
                             }
                         },

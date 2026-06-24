@@ -1,7 +1,7 @@
 package com.example.vyapar.ui.main
 
 import android.annotation.SuppressLint
-import android.bluetooth.BluetoothDevice
+import com.example.vyapar.printer.BleScanResultItem
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -148,6 +148,7 @@ class SettingsViewModel(private val repository: DataRepository) : ViewModel() {
                         put("discount", txn.discount)
                         put("grandTotal", txn.grandTotal)
                         put("type", txn.type)
+                        put("isPaid", txn.isPaid)
                     }
                     txnsArr.put(txnObj)
 
@@ -257,7 +258,8 @@ class SettingsViewModel(private val repository: DataRepository) : ViewModel() {
                         val grandTotal = obj.optDouble("grandTotal", obj.optDouble("grand_total", total))
                         val discount = obj.optDouble("discount", 0.0)
                         val type = obj.optString("type", "SALE")
-                        txnsList.add(TransactionEntity(id = id, date = date, total = total, grandTotal = grandTotal, discount = discount, type = type))
+                        val isPaid = obj.optBoolean("isPaid", true)
+                        txnsList.add(TransactionEntity(id = id, date = date, total = total, grandTotal = grandTotal, discount = discount, type = type, isPaid = isPaid))
                     }
                 }
 
@@ -302,7 +304,7 @@ fun SettingsScreen(
     val printerManager = remember { ThermalPrinterManager(context) }
 
     val importLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
+        contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri != null) {
             viewModel.importBackup(context, uri) { success, message ->
@@ -317,16 +319,10 @@ fun SettingsScreen(
     var bizAddress by remember { mutableStateOf(businessProfile.address) }
 
     var selectedPrinterMac by remember { mutableStateOf(viewModel.getSelectedPrinterAddress() ?: "") }
-    var pairedDevices by remember { mutableStateOf(emptyList<BluetoothDevice>()) }
+    var bleDevices by remember { mutableStateOf(emptyList<BleScanResultItem>()) }
+    var isScanning by remember { mutableStateOf(false) }
 
     var showResetConfirm by remember { mutableStateOf(false) }
-
-    // Load paired devices if permission exists
-    LaunchedEffect(key1 = true) {
-        if (printerManager.hasBluetoothPermission()) {
-            pairedDevices = printerManager.getPairedDevices()
-        }
-    }
 
     LazyColumn(
         modifier = modifier
@@ -383,9 +379,9 @@ fun SettingsScreen(
             }
         }
 
-        // Section: Bluetooth Printer Setup
+        // Section: BLE Thermal Printer Setup
         item {
-            Text("Bluetooth Thermal Printer", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF1E293B))
+            Text("BLE Thermal Printer", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF1E293B))
             Spacer(modifier = Modifier.height(8.dp))
             Card(
                 shape = RoundedCornerShape(12.dp),
@@ -400,17 +396,68 @@ fun SettingsScreen(
                     } else if (!printerManager.hasBluetoothPermission()) {
                         Text("Bluetooth permission is not granted. Please allow permissions in settings.", color = Color(0xFFEF4444), fontSize = 13.sp)
                     } else {
-                        Text(
-                            text = "Select Paired Printer Device (F2C / POS / MTP):",
-                            fontWeight = FontWeight.Medium,
-                            fontSize = 13.sp,
-                            color = Color(0xFF64748B)
-                        )
+                        // Current selection display
+                        if (selectedPrinterMac.isNotBlank()) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(Color(0xFFDBEAFE), RoundedCornerShape(8.dp))
+                                    .padding(12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column {
+                                    Text("Selected Printer", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF1E293B))
+                                    Text(selectedPrinterMac, fontSize = 11.sp, color = Color(0xFF64748B))
+                                }
+                                Text("✅ Connected", color = Color(0xFF16A34A), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Spacer(modifier = Modifier.height(10.dp))
+                        }
+
+                        // Scan button
+                        Button(
+                            onClick = {
+                                if (!isScanning) {
+                                    isScanning = true
+                                    bleDevices = emptyList()
+                                    printerManager.scanBleDevices { results ->
+                                        bleDevices = results
+                                        isScanning = false
+                                    }
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isScanning) Color(0xFF94A3B8) else Color(0xFF2563EB)
+                            ),
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(8.dp),
+                            enabled = !isScanning
+                        ) {
+                            if (isScanning) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    color = Color.White,
+                                    strokeWidth = 2.dp
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Scanning for BLE printers...", fontWeight = FontWeight.Bold)
+                            } else {
+                                Text("🔍 Scan for BLE Printers", fontWeight = FontWeight.Bold)
+                            }
+                        }
+
                         Spacer(modifier = Modifier.height(8.dp))
-                        if (pairedDevices.isEmpty()) {
-                            Text("No paired bluetooth devices found. Pair the thermal printer in your phone Bluetooth settings first.", fontSize = 12.sp, color = Color(0xFF94A3B8))
+
+                        // Scanned device list
+                        if (bleDevices.isEmpty() && !isScanning) {
+                            Text(
+                                "Turn on your BLE thermal printer (F2C / POS) and tap 'Scan' above.",
+                                fontSize = 12.sp,
+                                color = Color(0xFF94A3B8)
+                            )
                         } else {
-                            pairedDevices.forEach { device ->
+                            bleDevices.forEach { device ->
                                 val isSelected = device.address == selectedPrinterMac
                                 Row(
                                     modifier = Modifier
@@ -429,11 +476,11 @@ fun SettingsScreen(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Column {
-                                        Text(device.name ?: "Unknown Device", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                        Text(device.name, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF1E293B))
                                         Text(device.address, fontSize = 11.sp, color = Color.Gray)
                                     }
                                     if (isSelected) {
-                                        Text("Selected", color = Color(0xFF2563EB), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        Text("✅ Selected", color = Color(0xFF2563EB), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                     }
                                 }
                             }
@@ -488,7 +535,7 @@ fun SettingsScreen(
                     // Import Backup
                     Button(
                         onClick = {
-                            importLauncher.launch("application/json")
+                            importLauncher.launch(arrayOf("application/json", "*/*"))
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4F46E5)),
                         modifier = Modifier.fillMaxWidth(),

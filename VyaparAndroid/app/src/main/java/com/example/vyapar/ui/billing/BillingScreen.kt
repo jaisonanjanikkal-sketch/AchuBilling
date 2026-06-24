@@ -23,6 +23,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.vyapar.data.*
@@ -109,7 +111,7 @@ class BillingViewModel(private val repository: DataRepository) : ViewModel() {
         editingTransactionId = null
     }
 
-    suspend fun commitSaleAndGetInvoice(): TransactionWithItems? {
+    suspend fun commitSaleAndGetInvoice(isPaid: Boolean = true): TransactionWithItems? {
         if (billItems.isEmpty()) return null
         
         val date = System.currentTimeMillis()
@@ -118,7 +120,8 @@ class BillingViewModel(private val repository: DataRepository) : ViewModel() {
             date = date,
             total = total,
             grandTotal = total,
-            type = "SALE"
+            type = "SALE",
+            isPaid = isPaid
         )
 
         val items = billItems.map { lineItem ->
@@ -177,6 +180,7 @@ fun BillingScreen(
     var qtyInput by remember { mutableStateOf("1") }
     
     var showSuggestions by remember { mutableStateOf(false) }
+    val itemNameFocusRequester = remember { FocusRequester() }
 
     fun addCurrentItem() {
         val name = itemNameInput.trim()
@@ -203,6 +207,8 @@ fun BillingScreen(
         rateInput = ""
         qtyInput = "1"
         showSuggestions = false
+        // Return focus to product name field for rapid entry
+        itemNameFocusRequester.requestFocus()
     }
 
     var savedInvoiceForOptions by remember { mutableStateOf<TransactionWithItems?>(null) }
@@ -224,7 +230,11 @@ fun BillingScreen(
                     Spacer(modifier = Modifier.height(6.dp))
                     Button(
                         onClick = {
-                            if (printerAddress != null) {
+                            if (printerAddress.isNullOrBlank()) {
+                                Toast.makeText(context, "Printer not paired. Configure printer in Settings.", Toast.LENGTH_LONG).show()
+                            } else if (!printerManager.hasBluetoothPermission()) {
+                                Toast.makeText(context, "Bluetooth permissions are required for printing.", Toast.LENGTH_LONG).show()
+                            } else {
                                 viewModel.viewModelScope.launch {
                                     Toast.makeText(context, "Connecting to printer...", Toast.LENGTH_SHORT).show()
                                     val printResult = printerManager.printInvoice(printerAddress, profile, invoice)
@@ -234,8 +244,6 @@ fun BillingScreen(
                                         Toast.makeText(context, "Print failed: ${printResult.exceptionOrNull()?.message}", Toast.LENGTH_LONG).show()
                                     }
                                 }
-                            } else {
-                                Toast.makeText(context, "Printer not paired. Configure printer in Settings.", Toast.LENGTH_LONG).show()
                             }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16A34A)),
@@ -325,7 +333,7 @@ fun BillingScreen(
                                 showSuggestions = it.isNotBlank()
                             },
                             label = { Text("Search or Enter Product Name") },
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier.fillMaxWidth().focusRequester(itemNameFocusRequester),
                             singleLine = true,
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedTextColor = Color.Black,
@@ -523,12 +531,13 @@ fun BillingScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(16.dp),
-                        horizontalArrangement = Arrangement.Center
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
+                        // Save as Paid button
                         Button(
                             onClick = {
                                 viewModel.viewModelScope.launch {
-                                    val invoice = viewModel.commitSaleAndGetInvoice()
+                                    val invoice = viewModel.commitSaleAndGetInvoice(isPaid = true)
                                     if (invoice != null) {
                                         savedInvoiceForOptions = invoice
                                     } else {
@@ -536,11 +545,30 @@ fun BillingScreen(
                                     }
                                 }
                             },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
-                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16A34A)),
+                            modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(8.dp)
                         ) {
-                            Text("Save Invoice", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                            Text("Save Paid \u2705", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        }
+
+                        // Save as Unpaid button
+                        Button(
+                            onClick = {
+                                viewModel.viewModelScope.launch {
+                                    val invoice = viewModel.commitSaleAndGetInvoice(isPaid = false)
+                                    if (invoice != null) {
+                                        savedInvoiceForOptions = invoice
+                                    } else {
+                                        Toast.makeText(context, "Error saving invoice", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD97706)),
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("Save Unpaid \u23F3", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                         }
                     }
                 }

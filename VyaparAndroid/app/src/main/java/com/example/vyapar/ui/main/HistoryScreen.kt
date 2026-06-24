@@ -263,7 +263,11 @@ fun HistoryScreen(
                                 val printerAddress = viewModel.getSelectedPrinterAddress()
                                 val profile = viewModel.getBusinessProfile()
 
-                                if (printerAddress != null && printerManager.hasBluetoothPermission()) {
+                                if (printerAddress.isNullOrBlank()) {
+                                    Toast.makeText(context, "Please set a printer in Settings first", Toast.LENGTH_LONG).show()
+                                } else if (!printerManager.hasBluetoothPermission()) {
+                                    Toast.makeText(context, "Bluetooth permissions are required for printing.", Toast.LENGTH_LONG).show()
+                                } else {
                                     Toast.makeText(context, "Connecting to printer...", Toast.LENGTH_SHORT).show()
                                     val printResult = printerManager.printInvoice(printerAddress, profile, invoice)
                                     if (printResult.isSuccess) {
@@ -271,8 +275,6 @@ fun HistoryScreen(
                                     } else {
                                         Toast.makeText(context, "Print failed: ${printResult.exceptionOrNull()?.message}", Toast.LENGTH_LONG).show()
                                     }
-                                } else {
-                                    Toast.makeText(context, "Please set a printer in Settings first", Toast.LENGTH_LONG).show()
                                 }
                             }
                         }

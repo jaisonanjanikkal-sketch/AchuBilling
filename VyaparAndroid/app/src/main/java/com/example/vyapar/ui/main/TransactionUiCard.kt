@@ -64,14 +64,22 @@ fun TransactionUiCard(
                         text = formatCurrency(txn.transaction.grandTotal),
                         fontSize = 15.sp,
                         fontWeight = FontWeight.ExtraBold,
-                        color = Color(0xFF16A34A)
+                        color = if (txn.transaction.isPaid) Color(0xFF16A34A) else Color(0xFFD97706)
                     )
                     Box(
                         modifier = Modifier
-                            .background(Color(0xFFDCFCE7), RoundedCornerShape(4.dp))
+                            .background(
+                                if (txn.transaction.isPaid) Color(0xFFDCFCE7) else Color(0xFFFEF3C7),
+                                RoundedCornerShape(4.dp)
+                            )
                             .padding(horizontal = 6.dp, vertical = 2.dp)
                     ) {
-                        Text(text = "Paid", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFF16A34A))
+                        Text(
+                            text = if (txn.transaction.isPaid) "Paid" else "Unpaid",
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (txn.transaction.isPaid) Color(0xFF16A34A) else Color(0xFFD97706)
+                        )
                     }
                 }
             }

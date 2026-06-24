@@ -3,26 +3,69 @@ package com.example.vyapar.printer
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
-import android.bluetooth.BluetoothSocket
+import android.bluetooth.BluetoothGatt
+import android.bluetooth.BluetoothGattCallback
+import android.bluetooth.BluetoothGattCharacteristic
+import android.bluetooth.BluetoothGattService
+import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothProfile
+import android.bluetooth.le.BluetoothLeScanner
+import android.bluetooth.le.ScanCallback
+import android.bluetooth.le.ScanResult
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
 import androidx.core.content.ContextCompat
 import com.example.vyapar.data.BusinessProfile
 import com.example.vyapar.data.TransactionWithItems
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
-import java.io.IOException
-import java.io.OutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
+import kotlin.coroutines.resume
+
+data class BleScanResultItem(
+    val name: String,
+    val address: String,
+    val device: BluetoothDevice
+)
 
 class ThermalPrinterManager(private val context: Context) {
 
-    private val sppUuid: UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
-    private val bluetoothAdapter: BluetoothAdapter? = BluetoothAdapter.getDefaultAdapter()
+    companion object {
+        private const val TAG = "BLEPrinter"
+        private const val SCAN_TIMEOUT_MS = 10_000L // 10 seconds
+        private const val CHUNK_SIZE = 20 // BLE MTU default write chunk
+        private const val CHUNK_DELAY_MS = 50L // delay between chunks
+
+        // Common BLE thermal printer service/characteristic UUIDs
+        private val KNOWN_PRINTER_SERVICE_UUIDS = listOf(
+            UUID.fromString("0000ae30-0000-1000-8000-00805f9b34fb"), // F2C / common Chinese printers
+            UUID.fromString("000018f0-0000-1000-8000-00805f9b34fb"), // Generic thermal
+            UUID.fromString("0000ff00-0000-1000-8000-00805f9b34fb"), // Alt generic
+            UUID.fromString("e7810a71-73ae-499d-8c15-faa9aef0c3f2")  // Nordic UART
+        )
+        private val KNOWN_WRITE_CHAR_UUIDS = listOf(
+            UUID.fromString("0000ae01-0000-1000-8000-00805f9b34fb"), // F2C write char
+            UUID.fromString("00002af1-0000-1000-8000-00805f9b34fb"), // Generic write
+            UUID.fromString("0000ff02-0000-1000-8000-00805f9b34fb"), // Alt write
+            UUID.fromString("bef8d6c9-9c21-4c9e-b632-bd58c1009f9f")  // Nordic TX
+        )
+    }
+
+    private val bluetoothManager: BluetoothManager? =
+        context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
+    private val bluetoothAdapter: BluetoothAdapter? = bluetoothManager?.adapter
+    private val bleScanner: BluetoothLeScanner? get() = bluetoothAdapter?.bluetoothLeScanner
+
+    private var scanCallback: ScanCallback? = null
+    private val handler = Handler(Looper.getMainLooper())
 
     fun isBluetoothSupported(): Boolean = bluetoothAdapter != null
 
@@ -30,17 +73,68 @@ class ThermalPrinterManager(private val context: Context) {
 
     fun hasBluetoothPermission(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            ContextCompat.checkSelfPermission(context, android.Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
+            ContextCompat.checkSelfPermission(context, android.Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED &&
+            ContextCompat.checkSelfPermission(context, android.Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED
         } else {
             ContextCompat.checkSelfPermission(context, android.Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
         }
     }
 
+    // ─── BLE Scanning ───────────────────────────────────────────────────
+
     @SuppressLint("MissingPermission")
-    fun getPairedDevices(): List<BluetoothDevice> {
-        if (!hasBluetoothPermission()) return emptyList()
-        return bluetoothAdapter?.bondedDevices?.toList() ?: emptyList()
+    fun scanBleDevices(onResult: (List<BleScanResultItem>) -> Unit) {
+        val scanner = bleScanner
+        if (scanner == null) {
+            onResult(emptyList())
+            return
+        }
+
+        val discoveredDevices = mutableMapOf<String, BleScanResultItem>()
+
+        // Stop any previous scan
+        stopScan()
+
+        scanCallback = object : ScanCallback() {
+            override fun onScanResult(callbackType: Int, result: ScanResult) {
+                val device = result.device
+                val name = device.name ?: return // skip unnamed devices
+                val address = device.address ?: return
+                if (!discoveredDevices.containsKey(address)) {
+                    discoveredDevices[address] = BleScanResultItem(name, address, device)
+                    Log.d(TAG, "BLE Device found: $name ($address)")
+                }
+            }
+
+            override fun onScanFailed(errorCode: Int) {
+                Log.e(TAG, "BLE Scan failed with error code: $errorCode")
+                onResult(emptyList())
+            }
+        }
+
+        scanner.startScan(scanCallback)
+        Log.d(TAG, "BLE Scan started")
+
+        // Auto-stop after timeout
+        handler.postDelayed({
+            stopScan()
+            onResult(discoveredDevices.values.toList())
+        }, SCAN_TIMEOUT_MS)
     }
+
+    @SuppressLint("MissingPermission")
+    fun stopScan() {
+        scanCallback?.let { callback ->
+            try {
+                bleScanner?.stopScan(callback)
+            } catch (e: Exception) {
+                Log.w(TAG, "Error stopping scan: ${e.message}")
+            }
+        }
+        scanCallback = null
+    }
+
+    // ─── BLE Printing via GATT ──────────────────────────────────────────
 
     @SuppressLint("MissingPermission")
     suspend fun printInvoice(
@@ -48,40 +142,185 @@ class ThermalPrinterManager(private val context: Context) {
         profile: BusinessProfile,
         invoice: TransactionWithItems
     ): Result<Unit> = withContext(Dispatchers.IO) {
-        if (bluetoothAdapter == null) return@withContext Result.failure(Exception("Bluetooth not supported"))
+        if (bluetoothAdapter == null) {
+            return@withContext Result.failure(Exception("Bluetooth not supported"))
+        }
+
         val device = try {
             bluetoothAdapter.getRemoteDevice(deviceAddress)
         } catch (e: IllegalArgumentException) {
-            return@withContext Result.failure(Exception("Invalid MAC Address"))
+            return@withContext Result.failure(Exception("Invalid MAC Address: $deviceAddress"))
         }
 
-        var socket: BluetoothSocket? = null
-        var outputStream: OutputStream? = null
+        val receiptBytes = compileReceiptBytes(profile, invoice)
 
         try {
-            socket = device.createRfcommSocketToServiceRecord(sppUuid)
-            socket.connect()
-            outputStream = socket.outputStream
-
-            val printBytes = compileReceiptBytes(profile, invoice)
-            outputStream.write(printBytes)
-            outputStream.flush()
-
-            // Feed paper
-            outputStream.write(byteArrayOf(0x1B, 0x64, 0x05)) // Feed 5 lines
-            
-            Result.success(Unit)
-        } catch (e: IOException) {
+            val result = connectAndPrint(device, receiptBytes)
+            result
+        } catch (e: Exception) {
+            Log.e(TAG, "BLE Print failed", e)
             Result.failure(e)
-        } finally {
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private suspend fun connectAndPrint(
+        device: BluetoothDevice,
+        data: ByteArray
+    ): Result<Unit> = suspendCancellableCoroutine { continuation ->
+        var gatt: BluetoothGatt? = null
+        var resumed = false
+
+        fun safeResume(result: Result<Unit>) {
+            if (!resumed) {
+                resumed = true
+                try {
+                    gatt?.close()
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error closing GATT: ${e.message}")
+                }
+                continuation.resume(result)
+            }
+        }
+
+        // Timeout: if nothing happens within 30 seconds, fail
+        val timeoutRunnable = Runnable {
+            safeResume(Result.failure(Exception("BLE connection timed out")))
+        }
+        handler.postDelayed(timeoutRunnable, 30_000L)
+
+        val gattCallback = object : BluetoothGattCallback() {
+            override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
+                if (newState == BluetoothProfile.STATE_CONNECTED) {
+                    Log.d(TAG, "GATT connected, discovering services...")
+                    g.discoverServices()
+                } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                    Log.d(TAG, "GATT disconnected")
+                    if (!resumed) {
+                        safeResume(Result.failure(Exception("Printer disconnected unexpectedly")))
+                    }
+                }
+            }
+
+            override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
+                if (status != BluetoothGatt.GATT_SUCCESS) {
+                    safeResume(Result.failure(Exception("Service discovery failed (status $status)")))
+                    return
+                }
+
+                Log.d(TAG, "Services discovered: ${g.services.map { it.uuid }}")
+
+                // Find writable characteristic
+                val writeChar = findWritableCharacteristic(g)
+                if (writeChar == null) {
+                    val allServices = g.services.joinToString("\n") { svc ->
+                        "Service: ${svc.uuid}\n" + svc.characteristics.joinToString("\n") { ch ->
+                            "  Char: ${ch.uuid} props=${ch.properties}"
+                        }
+                    }
+                    Log.e(TAG, "No writable characteristic found. Available:\n$allServices")
+                    safeResume(Result.failure(Exception("No writable printer characteristic found. Ensure printer is a BLE thermal printer.")))
+                    return
+                }
+
+                Log.d(TAG, "Using write characteristic: ${writeChar.uuid}")
+
+                // Write data in chunks on a background thread
+                Thread {
+                    try {
+                        writeDataInChunks(g, writeChar, data)
+                        handler.removeCallbacks(timeoutRunnable)
+                        // Small delay to let the printer finish
+                        Thread.sleep(500)
+                        safeResume(Result.success(Unit))
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error writing to printer", e)
+                        handler.removeCallbacks(timeoutRunnable)
+                        safeResume(Result.failure(e))
+                    }
+                }.start()
+            }
+        }
+
+        gatt = device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
+
+        continuation.invokeOnCancellation {
+            handler.removeCallbacks(timeoutRunnable)
             try {
-                outputStream?.close()
-                socket?.close()
+                gatt?.close()
             } catch (e: Exception) {
-                // Ignore close exceptions
+                Log.w(TAG, "Error closing GATT on cancel: ${e.message}")
             }
         }
     }
+
+    @SuppressLint("MissingPermission")
+    private fun findWritableCharacteristic(gatt: BluetoothGatt): BluetoothGattCharacteristic? {
+        // 1. Try known printer service/char UUIDs first
+        for (serviceUuid in KNOWN_PRINTER_SERVICE_UUIDS) {
+            val service = gatt.getService(serviceUuid)
+            if (service != null) {
+                for (charUuid in KNOWN_WRITE_CHAR_UUIDS) {
+                    val char = service.getCharacteristic(charUuid)
+                    if (char != null && isWritable(char)) {
+                        return char
+                    }
+                }
+                // Fallback: find any writable char in this known service
+                for (char in service.characteristics) {
+                    if (isWritable(char)) return char
+                }
+            }
+        }
+
+        // 2. Scan all services for any writable characteristic
+        for (service in gatt.services) {
+            for (char in service.characteristics) {
+                if (isWritable(char)) return char
+            }
+        }
+
+        return null
+    }
+
+    private fun isWritable(char: BluetoothGattCharacteristic): Boolean {
+        val props = char.properties
+        return (props and BluetoothGattCharacteristic.PROPERTY_WRITE) != 0 ||
+               (props and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) != 0
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun writeDataInChunks(
+        gatt: BluetoothGatt,
+        characteristic: BluetoothGattCharacteristic,
+        data: ByteArray
+    ) {
+        var offset = 0
+        while (offset < data.size) {
+            val end = minOf(offset + CHUNK_SIZE, data.size)
+            val chunk = data.copyOfRange(offset, end)
+
+            characteristic.value = chunk
+            // Use WRITE_NO_RESPONSE if supported for speed, else standard WRITE
+            characteristic.writeType =
+                if ((characteristic.properties and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) != 0)
+                    BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+                else
+                    BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+
+            val success = gatt.writeCharacteristic(characteristic)
+            if (!success) {
+                throw Exception("Failed to write chunk at offset $offset")
+            }
+
+            offset = end
+            // Small delay to avoid overwhelming the BLE buffer
+            Thread.sleep(CHUNK_DELAY_MS)
+        }
+        Log.d(TAG, "Successfully wrote ${data.size} bytes in ${(data.size + CHUNK_SIZE - 1) / CHUNK_SIZE} chunks")
+    }
+
+    // ─── ESC/POS Receipt Formatting ─────────────────────────────────────
 
     private fun compileReceiptBytes(profile: BusinessProfile, invoice: TransactionWithItems): ByteArray {
         val bytes = mutableListOf<Byte>()
@@ -132,7 +371,7 @@ class ThermalPrinterManager(private val context: Context) {
         val dateStr = sdf.format(Date(invoice.transaction.date))
         writeText("Invoice #: ${invoice.transaction.id}\n")
         writeText("Date: $dateStr\n")
-        writeText("Payment Mode: Cash\n")
+        writeText("Payment: ${if (invoice.transaction.isPaid) "Paid" else "Unpaid"}\n")
         writeText("--------------------------------\n")
 
         // Column Headers
@@ -183,6 +422,9 @@ class ThermalPrinterManager(private val context: Context) {
         writeBytes(alignCenter)
         writeText("Thank you for your purchase!\n")
         writeText("Please visit again.\n")
+
+        // Feed paper
+        writeBytes(byteArrayOf(0x1B, 0x64, 0x05)) // Feed 5 lines
 
         return bytes.toByteArray()
     }
