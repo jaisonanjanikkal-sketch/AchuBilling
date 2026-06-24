@@ -29,6 +29,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.text.NumberFormat
 import java.text.SimpleDateFormat
@@ -99,7 +101,9 @@ class DashboardViewModel(private val repository: DataRepository) : ViewModel() {
             topSellingItems = topSelling,
             recentTransactions = txns // Fetch all transactions to match React dashboard
         )
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), DashboardState())
+    }
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), DashboardState())
 
     fun getBusinessProfile(): BusinessProfile = repository.getBusinessProfile()
     fun getSelectedPrinterAddress(): String? = repository.getSelectedPrinterAddress()
@@ -154,7 +158,7 @@ fun DashboardScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .background(Color(0xFFF1F5F9)),
-            contentPadding = PaddingValues(16.dp),
+            contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 88.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // Header Space / Title

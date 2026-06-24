@@ -35,6 +35,9 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 data class BillLineItem(
@@ -63,7 +66,9 @@ class BillingViewModel(private val repository: DataRepository) : ViewModel() {
     fun addLineItem(name: String, rate: Double, qty: Double) {
         viewModelScope.launch {
             // Find existing product code by name (case-insensitive)
-            val allItems = repository.searchItemsFlow("").stateIn(viewModelScope).value
+            val allItems = withContext(Dispatchers.IO) {
+                repository.getItemsFlow().first()
+            }
             val existing = allItems.find { it.name.lowercase() == name.lowercase() }
             val code = existing?.code ?: ("__new__" + System.currentTimeMillis())
 
@@ -135,7 +140,9 @@ class BillingViewModel(private val repository: DataRepository) : ViewModel() {
         }
 
         // Retrieve the saved transaction with generated ID
-        val txns = repository.getTransactionsFlow().stateIn(viewModelScope).value
+        val txns = withContext(Dispatchers.IO) {
+            repository.getTransactionsFlow().first()
+        }
         val savedInvoice = txns.firstOrNull { 
             if (txnId != null) it.transaction.id == txnId
             else it.transaction.date == date && it.transaction.total == total 
@@ -319,7 +326,13 @@ fun BillingScreen(
                             },
                             label = { Text("Search or Enter Product Name") },
                             modifier = Modifier.fillMaxWidth(),
-                            singleLine = true
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.Black,
+                                unfocusedTextColor = Color.Black,
+                                focusedContainerColor = Color.White,
+                                unfocusedContainerColor = Color.White
+                            )
                         )
 
                         // Suggestions list overlays on top of content
@@ -372,7 +385,13 @@ fun BillingScreen(
                             label = { Text("Rate (₹)") },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             modifier = Modifier.weight(1.2f),
-                            singleLine = true
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.Black,
+                                unfocusedTextColor = Color.Black,
+                                focusedContainerColor = Color.White,
+                                unfocusedContainerColor = Color.White
+                            )
                         )
                         Spacer(modifier = Modifier.width(10.dp))
                         OutlinedTextField(
@@ -381,7 +400,13 @@ fun BillingScreen(
                             label = { Text("Qty") },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             modifier = Modifier.weight(0.8f),
-                            singleLine = true
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.Black,
+                                unfocusedTextColor = Color.Black,
+                                focusedContainerColor = Color.White,
+                                unfocusedContainerColor = Color.White
+                            )
                         )
                     }
 

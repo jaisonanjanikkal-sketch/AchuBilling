@@ -53,6 +53,9 @@ fun MainNavigation() {
     // Hide bottom navigation on billing screen to optimize screen estate
     val showBottomNav = currentRoute != "billing"
 
+    // Only show main FAB on Home and Dashboard to avoid double-FAB stacking on items/settings screen
+    val showMainFab = currentRoute == "home" || currentRoute == "dashboard"
+
     Scaffold(
         topBar = {
             if (showBottomNav) {
@@ -85,7 +88,7 @@ fun MainNavigation() {
             }
         },
         floatingActionButton = {
-            if (showBottomNav) {
+            if (showMainFab) {
                 ExtendedFloatingActionButton(
                     text = { Text("＋ Add New Sale", fontWeight = FontWeight.Bold, fontSize = 13.sp) },
                     icon = { Icon(Icons.Default.ShoppingCart, contentDescription = "New Sale") },

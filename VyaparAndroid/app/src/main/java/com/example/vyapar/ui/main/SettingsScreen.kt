@@ -34,6 +34,8 @@ import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 import java.io.File
 
 class SettingsViewModel(private val repository: DataRepository) : ViewModel() {
@@ -69,7 +71,9 @@ class SettingsViewModel(private val repository: DataRepository) : ViewModel() {
             }
 
             // Pre-add mock transactions if none exist
-            val list = repository.getTransactionsFlow().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList()).value
+            val list = withContext(Dispatchers.IO) {
+                repository.getTransactionsFlow().first()
+            }
             if (list.isEmpty()) {
                 val mockTxn1 = TransactionEntity(
                     date = System.currentTimeMillis() - 86400000L, // 1 day ago
@@ -104,7 +108,7 @@ class SettingsViewModel(private val repository: DataRepository) : ViewModel() {
     }
 
     fun exportBackup(context: Context, onResult: (Boolean, String) -> Unit) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
                 val items = repository.getItemsFlow().first()
                 val transactionsWithItems = repository.getTransactionsFlow().first()
@@ -184,27 +188,35 @@ class SettingsViewModel(private val repository: DataRepository) : ViewModel() {
                 chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 context.startActivity(chooser)
 
-                onResult(true, "Backup file generated!")
+                withContext(Dispatchers.Main) {
+                    onResult(true, "Backup file generated!")
+                }
             } catch (e: Exception) {
-                onResult(false, "Export failed: ${e.message}")
+                withContext(Dispatchers.Main) {
+                    onResult(false, "Export failed: ${e.message}")
+                }
             }
         }
     }
 
     fun importBackup(context: Context, uri: android.net.Uri, onResult: (Boolean, String) -> Unit) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
                 val jsonString = context.contentResolver.openInputStream(uri)?.use { inputStream ->
                     inputStream.bufferedReader().use { it.readText() }
                 }
                 if (jsonString == null) {
-                    onResult(false, "Failed to read file contents")
+                    withContext(Dispatchers.Main) {
+                        onResult(false, "Failed to read file contents")
+                    }
                     return@launch
                 }
 
                 val root = org.json.JSONObject(jsonString)
                 if (!root.has("items") && !root.has("transactions") && !root.has("business")) {
-                    onResult(false, "Invalid backup file structure")
+                    withContext(Dispatchers.Main) {
+                        onResult(false, "Invalid backup file structure")
+                    }
                     return@launch
                 }
 
@@ -266,10 +278,14 @@ class SettingsViewModel(private val repository: DataRepository) : ViewModel() {
                 }
 
                 repository.restoreBackup(bizProfile, itemsList, txnsList, txnItemsList)
-                onResult(true, "Backup restored successfully!")
+                withContext(Dispatchers.Main) {
+                    onResult(true, "Backup restored successfully!")
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
-                onResult(false, "Import failed: ${e.message}")
+                withContext(Dispatchers.Main) {
+                    onResult(false, "Import failed: ${e.message}")
+                }
             }
         }
     }

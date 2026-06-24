@@ -44,6 +44,14 @@ class DefaultDataRepository(private val context: Context) : DataRepository {
 
     private val prefs: SharedPreferences = context.getSharedPreferences("vyapar_prefs", Context.MODE_PRIVATE)
 
+    @Volatile
+    private var cachedProfile: BusinessProfile? = null
+    @Volatile
+    private var cachedPrinterAddress: String? = null
+    @Volatile
+    private var cachedPrinterAddressLoaded = false
+    private val cacheLock = Any()
+
     // Items
     override fun getItemsFlow(): Flow<List<ItemEntity>> = itemDao.getAllItemsFlow()
 
@@ -161,13 +169,22 @@ class DefaultDataRepository(private val context: Context) : DataRepository {
 
     // Business Profile
     override fun getBusinessProfile(): BusinessProfile {
-        val name = prefs.getString("biz_name", "My Business") ?: "My Business"
-        val phone = prefs.getString("biz_phone", "") ?: ""
-        val address = prefs.getString("biz_address", "") ?: ""
-        return BusinessProfile(name, phone, address)
+        return cachedProfile ?: synchronized(cacheLock) {
+            cachedProfile ?: run {
+                val name = prefs.getString("biz_name", "My Business") ?: "My Business"
+                val phone = prefs.getString("biz_phone", "") ?: ""
+                val address = prefs.getString("biz_address", "") ?: ""
+                val profile = BusinessProfile(name, phone, address)
+                cachedProfile = profile
+                profile
+            }
+        }
     }
 
     override fun saveBusinessProfile(profile: BusinessProfile) {
+        synchronized(cacheLock) {
+            cachedProfile = profile
+        }
         prefs.edit()
             .putString("biz_name", profile.name)
             .putString("biz_phone", profile.phone)
@@ -177,10 +194,27 @@ class DefaultDataRepository(private val context: Context) : DataRepository {
 
     // Printer Settings
     override fun getSelectedPrinterAddress(): String? {
-        return prefs.getString("selected_printer_mac", null)
+        return if (cachedPrinterAddressLoaded) {
+            cachedPrinterAddress
+        } else {
+            synchronized(cacheLock) {
+                if (cachedPrinterAddressLoaded) {
+                    cachedPrinterAddress
+                } else {
+                    val address = prefs.getString("selected_printer_mac", null)
+                    cachedPrinterAddress = address
+                    cachedPrinterAddressLoaded = true
+                    address
+                }
+            }
+        }
     }
 
     override fun saveSelectedPrinterAddress(address: String?) {
+        synchronized(cacheLock) {
+            cachedPrinterAddress = address
+            cachedPrinterAddressLoaded = true
+        }
         prefs.edit().putString("selected_printer_mac", address).apply()
     }
 

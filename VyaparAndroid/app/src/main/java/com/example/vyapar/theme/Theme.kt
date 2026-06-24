@@ -40,6 +40,7 @@ fun VyaparTheme(
     dynamicColor: Boolean = false, // Disabled to ensure branding colors are strictly applied
     content: @Composable () -> Unit,
 ) {
-    val colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme
+    // Force light scheme to ensure consistency with the web app design and branding colors
+    val colorScheme = LightColorScheme
     MaterialTheme(colorScheme = colorScheme, typography = Typography, content = content)
 }

@@ -38,6 +38,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
@@ -82,7 +84,9 @@ class HomeViewModel(private val repository: DataRepository) : ViewModel() {
             stats = HomeStats(todaySales, totalItemsSold, totalTransactions, lowStockCount),
             recentTransactions = txns.take(10)
         )
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), HomeState())
+    }
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), HomeState())
 
     fun getBusinessProfile(): BusinessProfile = repository.getBusinessProfile()
     fun getSelectedPrinterAddress(): String? = repository.getSelectedPrinterAddress()
@@ -142,7 +146,7 @@ fun HomeScreen(
 
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(16.dp),
+            contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 88.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // Stats Grid
