@@ -84,7 +84,7 @@ class DefaultDataRepository(private val context: Context) : DataRepository {
                 if (existingItem != null) {
                     val updatedStock = existingItem.stock - lineItem.quantity
                     itemDao.updateItem(existingItem.copy(stock = updatedStock))
-                } else if (!lineItem.itemCode.startsWith("__new__")) {
+                } else {
                     // Create dynamic product with negative stock if it didn't exist
                     val newItem = ItemEntity(
                         code = lineItem.itemCode,
