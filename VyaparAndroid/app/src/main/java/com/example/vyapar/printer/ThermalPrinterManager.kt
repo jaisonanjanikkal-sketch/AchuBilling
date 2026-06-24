@@ -41,7 +41,7 @@ class ThermalPrinterManager(private val context: Context) {
     companion object {
         private const val TAG = "BLEPrinter"
         private const val SCAN_TIMEOUT_MS = 10_000L // 10 seconds
-        private const val CHUNK_SIZE = 20 // BLE MTU default write chunk
+        private const val CHUNK_SIZE = 128 // BLE MTU default write chunk (increased to 128 for smoother printing)
         private const val CHUNK_DELAY_MS = 50L // delay between chunks
 
         // Common BLE thermal printer service/characteristic UUIDs
@@ -70,6 +70,7 @@ class ThermalPrinterManager(private val context: Context) {
 
     private var scanCallback: ScanCallback? = null
     private val handler = Handler(Looper.getMainLooper())
+    private var activeGatt: BluetoothGatt? = null
 
     fun isBluetoothSupported(): Boolean = bluetoothAdapter != null
 
@@ -151,6 +152,18 @@ class ThermalPrinterManager(private val context: Context) {
         scanCallback = null
     }
 
+    @SuppressLint("MissingPermission")
+    fun disconnect() {
+        try {
+            activeGatt?.disconnect()
+            activeGatt?.close()
+        } catch (e: Exception) {
+            Log.w(TAG, "Error during manual disconnect: ${e.message}")
+        } finally {
+            activeGatt = null
+        }
+    }
+
     // ─── BLE Printing via GATT ──────────────────────────────────────────
 
     @SuppressLint("MissingPermission")
@@ -193,6 +206,9 @@ class ThermalPrinterManager(private val context: Context) {
                 resumed = true
                 try {
                     gatt?.close()
+                    if (activeGatt == gatt) {
+                        activeGatt = null
+                    }
                 } catch (e: Exception) {
                     Log.w(TAG, "Error closing GATT: ${e.message}")
                 }
@@ -209,14 +225,23 @@ class ThermalPrinterManager(private val context: Context) {
         val gattCallback = object : BluetoothGattCallback() {
             override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
                 if (newState == BluetoothProfile.STATE_CONNECTED) {
-                    Log.d(TAG, "GATT connected, discovering services...")
-                    g.discoverServices()
+                    Log.d(TAG, "GATT connected, requesting MTU...")
+                    val mtuSuccess = g.requestMtu(128)
+                    if (!mtuSuccess) {
+                        Log.w(TAG, "Request MTU failed, starting service discovery directly")
+                        g.discoverServices()
+                    }
                 } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                     Log.d(TAG, "GATT disconnected")
                     if (!resumed) {
                         safeResume(Result.failure(Exception("Printer disconnected unexpectedly")))
                     }
                 }
+            }
+
+            override fun onMtuChanged(g: BluetoothGatt, mtu: Int, status: Int) {
+                Log.d(TAG, "MTU changed to $mtu, status=$status. Discovering services...")
+                g.discoverServices()
             }
 
             override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
@@ -260,11 +285,15 @@ class ThermalPrinterManager(private val context: Context) {
         }
 
         gatt = device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
+        activeGatt = gatt
 
         continuation.invokeOnCancellation {
             handler.removeCallbacks(timeoutRunnable)
             try {
                 gatt?.close()
+                if (activeGatt == gatt) {
+                    activeGatt = null
+                }
             } catch (e: Exception) {
                 Log.w(TAG, "Error closing GATT on cancel: ${e.message}")
             }
@@ -290,8 +319,16 @@ class ThermalPrinterManager(private val context: Context) {
             }
         }
 
-        // 2. Scan all services for any writable characteristic
+        // 2. Scan all services for any writable characteristic, excluding standard non-printer services
+        val ignoredServices = setOf(
+            UUID.fromString("00001800-0000-1000-8000-00805f9b34fb"), // Generic Access
+            UUID.fromString("00001801-0000-1000-8000-00805f9b34fb"), // Generic Attribute
+            UUID.fromString("0000180a-0000-1000-8000-00805f9b34fb"), // Device Information
+            UUID.fromString("0000180f-0000-1000-8000-00805f9b34fb")  // Battery Service
+        )
+
         for (service in gatt.services) {
+            if (ignoredServices.contains(service.uuid)) continue
             for (char in service.characteristics) {
                 if (isWritable(char)) return char
             }
@@ -441,7 +478,9 @@ class ThermalPrinterManager(private val context: Context) {
         writeText("Please visit again.\n")
 
         // Feed paper
-        writeBytes(byteArrayOf(0x1B, 0x64, 0x05)) // Feed 5 lines
+        writeBytes(byteArrayOf(0x0A, 0x0A, 0x0A, 0x0A)) // 4 Line Feeds (0x0A)
+        // Cut paper
+        writeBytes(byteArrayOf(0x1D, 0x56, 0x42, 0x00)) // Cut paper (using 0x1D, 0x56, 0x42, 0x00)
 
         return bytes.toByteArray()
     }

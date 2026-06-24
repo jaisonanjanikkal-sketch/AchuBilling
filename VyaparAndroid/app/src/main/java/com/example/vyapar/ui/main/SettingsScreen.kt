@@ -451,11 +451,25 @@ fun SettingsScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Column {
+                                Column(modifier = Modifier.weight(1f)) {
                                     Text("Selected Printer", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF1E293B))
                                     Text(selectedPrinterMac, fontSize = 11.sp, color = Color(0xFF64748B))
+                                    Text("✅ Connected", color = Color(0xFF16A34A), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                 }
-                                Text("✅ Connected", color = Color(0xFF16A34A), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Button(
+                                    onClick = {
+                                        printerManager.disconnect()
+                                        selectedPrinterMac = ""
+                                        viewModel.saveSelectedPrinterAddress(null)
+                                        Toast.makeText(context, "Printer Disconnected", Toast.LENGTH_SHORT).show()
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444)),
+                                    shape = RoundedCornerShape(6.dp),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                    modifier = Modifier.height(32.dp)
+                                ) {
+                                    Text("Disconnect", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
                             }
                             Spacer(modifier = Modifier.height(10.dp))
                         }
