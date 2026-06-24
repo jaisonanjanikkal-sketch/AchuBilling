@@ -47,12 +47,16 @@ class ThermalPrinterManager(private val context: Context) {
         // Common BLE thermal printer service/characteristic UUIDs
         private val KNOWN_PRINTER_SERVICE_UUIDS = listOf(
             UUID.fromString("0000ae30-0000-1000-8000-00805f9b34fb"), // F2C / common Chinese printers
+            UUID.fromString("0000ffe0-0000-1000-8000-00805f9b34fb"), // Common Chinese printers (FFE0)
+            UUID.fromString("49535343-fe7d-4ae5-8fa9-9fafd205e455"), // ISSC Printer
             UUID.fromString("000018f0-0000-1000-8000-00805f9b34fb"), // Generic thermal
             UUID.fromString("0000ff00-0000-1000-8000-00805f9b34fb"), // Alt generic
             UUID.fromString("e7810a71-73ae-499d-8c15-faa9aef0c3f2")  // Nordic UART
         )
         private val KNOWN_WRITE_CHAR_UUIDS = listOf(
             UUID.fromString("0000ae01-0000-1000-8000-00805f9b34fb"), // F2C write char
+            UUID.fromString("0000ffe1-0000-1000-8000-00805f9b34fb"), // FFE1 write char
+            UUID.fromString("49535343-114d-40d6-b403-b830532b2e55"), // ISSC write char
             UUID.fromString("00002af1-0000-1000-8000-00805f9b34fb"), // Generic write
             UUID.fromString("0000ff02-0000-1000-8000-00805f9b34fb"), // Alt write
             UUID.fromString("bef8d6c9-9c21-4c9e-b632-bd58c1009f9f")  // Nordic TX
@@ -72,12 +76,22 @@ class ThermalPrinterManager(private val context: Context) {
     fun isBluetoothEnabled(): Boolean = bluetoothAdapter?.isEnabled == true
 
     fun hasBluetoothPermission(): Boolean {
+        val locationGranted = ContextCompat.checkSelfPermission(context, android.Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+                ContextCompat.checkSelfPermission(context, android.Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             ContextCompat.checkSelfPermission(context, android.Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED &&
-            ContextCompat.checkSelfPermission(context, android.Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED
+            ContextCompat.checkSelfPermission(context, android.Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED &&
+            locationGranted
         } else {
-            ContextCompat.checkSelfPermission(context, android.Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+            locationGranted
         }
+    }
+
+    fun isLocationServiceEnabled(): Boolean {
+        val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as? android.location.LocationManager
+        return locationManager?.isProviderEnabled(android.location.LocationManager.GPS_PROVIDER) == true ||
+                locationManager?.isProviderEnabled(android.location.LocationManager.NETWORK_PROVIDER) == true
     }
 
     // ─── BLE Scanning ───────────────────────────────────────────────────
@@ -98,9 +112,12 @@ class ThermalPrinterManager(private val context: Context) {
         scanCallback = object : ScanCallback() {
             override fun onScanResult(callbackType: Int, result: ScanResult) {
                 val device = result.device
-                val name = device.name ?: return // skip unnamed devices
                 val address = device.address ?: return
-                if (!discoveredDevices.containsKey(address)) {
+                val rawName = device.name ?: result.scanRecord?.deviceName
+                val name = rawName ?: "Unknown BLE Device"
+                
+                val existing = discoveredDevices[address]
+                if (existing == null || (existing.name.startsWith("Unknown") && rawName != null)) {
                     discoveredDevices[address] = BleScanResultItem(name, address, device)
                     Log.d(TAG, "BLE Device found: $name ($address)")
                 }

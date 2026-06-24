@@ -1,6 +1,7 @@
 package com.example.vyapar.ui.main
 
 import android.annotation.SuppressLint
+import android.os.Build
 import com.example.vyapar.printer.BleScanResultItem
 import android.widget.Toast
 import androidx.compose.foundation.background
@@ -303,6 +304,10 @@ fun SettingsScreen(
     val context = LocalContext.current
     val printerManager = remember { ThermalPrinterManager(context) }
 
+    val permissionsLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { _ -> }
+
     val importLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
@@ -394,7 +399,47 @@ fun SettingsScreen(
                     } else if (!printerManager.isBluetoothEnabled()) {
                         Text("Please enable Bluetooth on your phone to connect the printer.", color = Color(0xFFD97706), fontSize = 13.sp)
                     } else if (!printerManager.hasBluetoothPermission()) {
-                        Text("Bluetooth permission is not granted. Please allow permissions in settings.", color = Color(0xFFEF4444), fontSize = 13.sp)
+                        Column {
+                            Text("Bluetooth & Location permissions are required for scanning.", color = Color(0xFFEF4444), fontSize = 13.sp)
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Button(
+                                onClick = {
+                                    val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                        arrayOf(
+                                            android.Manifest.permission.BLUETOOTH_SCAN,
+                                            android.Manifest.permission.BLUETOOTH_CONNECT,
+                                            android.Manifest.permission.ACCESS_FINE_LOCATION,
+                                            android.Manifest.permission.ACCESS_COARSE_LOCATION
+                                        )
+                                    } else {
+                                        arrayOf(
+                                            android.Manifest.permission.ACCESS_FINE_LOCATION,
+                                            android.Manifest.permission.ACCESS_COARSE_LOCATION
+                                        )
+                                    }
+                                    permissionsLauncher.launch(permissions)
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text("Grant Permissions", fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    } else if (!printerManager.isLocationServiceEnabled()) {
+                        Column {
+                            Text("Location services (GPS) must be turned ON to scan for BLE printers.", color = Color(0xFFD97706), fontSize = 13.sp)
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Button(
+                                onClick = {
+                                    val intent = Intent(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS)
+                                    context.startActivity(intent)
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text("Turn On Location", fontWeight = FontWeight.Bold)
+                            }
+                        }
                     } else {
                         // Current selection display
                         if (selectedPrinterMac.isNotBlank()) {
