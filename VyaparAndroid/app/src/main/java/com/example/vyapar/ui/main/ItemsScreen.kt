@@ -28,6 +28,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.launch
 
 class ItemsViewModel(private val repository: DataRepository) : ViewModel() {
@@ -38,6 +39,7 @@ class ItemsViewModel(private val repository: DataRepository) : ViewModel() {
         .flatMapLatest { query ->
             repository.searchItemsFlow(query)
         }
+        .flowOn(kotlinx.coroutines.Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     fun saveItem(code: String, name: String, salePrice: Double, stock: Double) {
