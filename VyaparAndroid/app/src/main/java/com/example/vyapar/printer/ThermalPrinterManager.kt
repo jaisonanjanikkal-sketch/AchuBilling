@@ -41,8 +41,8 @@ class ThermalPrinterManager(private val context: Context) {
     companion object {
         private const val TAG = "BLEPrinter"
         private const val SCAN_TIMEOUT_MS = 10_000L // 10 seconds
-        private const val CHUNK_SIZE = 64 // Smaller chunks to avoid BLE buffer overflow (red light / stutter)
-        private const val CHUNK_DELAY_MS = 150L // Generous delay between chunks to prevent printer buffer overrun
+        private const val CHUNK_SIZE = 64 // BLE write chunk size
+        private const val CHUNK_DELAY_MS = 100L // delay between chunks
 
         // Common BLE thermal printer service/characteristic UUIDs
         private val KNOWN_PRINTER_SERVICE_UUIDS = listOf(
@@ -355,9 +355,12 @@ class ThermalPrinterManager(private val context: Context) {
             val chunk = data.copyOfRange(offset, end)
 
             characteristic.value = chunk
-            // Always use WRITE_TYPE_DEFAULT (with response/ACK) for reliable printing
-            // WRITE_NO_RESPONSE can cause buffer overflow on thermal printers
-            characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+            // Use WRITE_NO_RESPONSE if supported for speed, else standard WRITE
+            characteristic.writeType =
+                if ((characteristic.properties and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) != 0)
+                    BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+                else
+                    BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
 
             val success = gatt.writeCharacteristic(characteristic)
             if (!success) {
