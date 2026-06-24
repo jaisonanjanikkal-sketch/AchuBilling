@@ -19,6 +19,7 @@ interface DataRepository {
     fun getTransactionsFlow(): Flow<List<TransactionWithItems>>
     suspend fun getTransactionById(id: Long): TransactionWithItems?
     suspend fun insertSale(transaction: TransactionEntity, items: List<TransactionItemEntity>)
+    suspend fun updateSale(transactionId: Long, transaction: TransactionEntity, items: List<TransactionItemEntity>)
     suspend fun deleteTransaction(id: Long)
     suspend fun clearAllData()
 
@@ -86,6 +87,42 @@ class DefaultDataRepository(private val context: Context) : DataRepository {
                     itemDao.updateItem(existingItem.copy(stock = updatedStock))
                 } else {
                     // Create dynamic product with negative stock if it didn't exist
+                    val newItem = ItemEntity(
+                        code = lineItem.itemCode,
+                        name = lineItem.itemName,
+                        salePrice = lineItem.rate,
+                        stock = -lineItem.quantity
+                    )
+                    itemDao.insertItem(newItem)
+                }
+            }
+        }
+    }
+
+    override suspend fun updateSale(transactionId: Long, transaction: TransactionEntity, items: List<TransactionItemEntity>) {
+        db.withTransaction {
+            val oldTransactionWithItems = transactionDao.getTransactionById(transactionId)
+            if (oldTransactionWithItems != null) {
+                for (oldLineItem in oldTransactionWithItems.items) {
+                    val existingItem = itemDao.getItemByCode(oldLineItem.itemCode)
+                    if (existingItem != null) {
+                        itemDao.updateItem(existingItem.copy(stock = existingItem.stock + oldLineItem.quantity))
+                    }
+                }
+                transactionDao.deleteTransactionById(transactionId)
+            }
+
+            val updatedTxn = transaction.copy(id = transactionId)
+            transactionDao.insertTransaction(updatedTxn)
+
+            val mappedItems = items.map { it.copy(transactionId = transactionId) }
+            transactionDao.insertTransactionItems(mappedItems)
+
+            for (lineItem in mappedItems) {
+                val existingItem = itemDao.getItemByCode(lineItem.itemCode)
+                if (existingItem != null) {
+                    itemDao.updateItem(existingItem.copy(stock = existingItem.stock - lineItem.quantity))
+                } else {
                     val newItem = ItemEntity(
                         code = lineItem.itemCode,
                         name = lineItem.itemName,

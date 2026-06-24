@@ -9,6 +9,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -28,6 +29,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -37,6 +39,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Share
 import com.example.vyapar.utils.InvoiceShareUtility
 import com.example.vyapar.data.BusinessProfile
+import com.example.vyapar.printer.ThermalPrinterManager
+import android.widget.Toast
 
 // ViewModel and State definitions
 data class DashboardStats(
@@ -93,11 +97,18 @@ class DashboardViewModel(private val repository: DataRepository) : ViewModel() {
             stats = DashboardStats(totalRevenue, avgInvoice, itemsSold, inventoryValue),
             lowStockItems = lowStock.take(5),
             topSellingItems = topSelling,
-            recentTransactions = txns.take(5)
+            recentTransactions = txns // Fetch all transactions to match React dashboard
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), DashboardState())
 
     fun getBusinessProfile(): BusinessProfile = repository.getBusinessProfile()
+    fun getSelectedPrinterAddress(): String? = repository.getSelectedPrinterAddress()
+
+    fun deleteTransaction(id: Long) {
+        viewModelScope.launch {
+            repository.deleteTransaction(id)
+        }
+    }
 }
 
 // UI Composable Screen
@@ -105,32 +116,58 @@ class DashboardViewModel(private val repository: DataRepository) : ViewModel() {
 fun DashboardScreen(
     viewModel: DashboardViewModel,
     onNavigateToBilling: () -> Unit,
-    onViewTransaction: (Long) -> Unit,
+    onEditTransaction: (TransactionWithItems) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.state.collectAsState()
     val context = LocalContext.current
+    val printerManager = remember { ThermalPrinterManager(context) }
+    var selectedTxnForDelete by remember { mutableStateOf<Long?>(null) }
+
+    if (selectedTxnForDelete != null) {
+        AlertDialog(
+            onDismissRequest = { selectedTxnForDelete = null },
+            title = { Text("Delete Transaction?") },
+            text = { Text("Are you sure you want to delete invoice #${selectedTxnForDelete}? This will also revert the item stocks.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        selectedTxnForDelete?.let { viewModel.deleteTransaction(it) }
+                        selectedTxnForDelete = null
+                        Toast.makeText(context, "Transaction deleted", Toast.LENGTH_SHORT).show()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626))
+                ) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { selectedTxnForDelete = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 
     Box(modifier = modifier.fillMaxSize()) {
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color(0xFFF8FAFC)),
-            contentPadding = PaddingValues(bottom = 80.dp)
+                .background(Color(0xFFF1F5F9)),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // Header Space / Title
             item {
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 20.dp),
+                    modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column {
                         Text(
-                            text = "Dashboard",
-                            fontSize = 26.sp,
+                            text = "Analytics Dashboard",
+                            fontSize = 22.sp,
                             fontWeight = FontWeight.ExtraBold,
                             color = Color(0xFF0F172A)
                         )
@@ -152,15 +189,14 @@ fun DashboardScreen(
 
             // Stat Grid
             item {
-                Column(modifier = Modifier.padding(horizontal = 16.dp)) {
-                    Row(modifier = Modifier.fillMaxWidth()) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         StatCard(
                             label = "TOTAL SALES",
                             value = formatCurrency(uiState.stats.totalRevenue),
                             gradient = Brush.linearGradient(listOf(Color(0xFF2563EB), Color(0xFF60A5FA))),
                             modifier = Modifier.weight(1f)
                         )
-                        Spacer(modifier = Modifier.width(12.dp))
                         StatCard(
                             label = "AVG INVOICE",
                             value = formatCurrency(uiState.stats.avgInvoice),
@@ -168,15 +204,13 @@ fun DashboardScreen(
                             modifier = Modifier.weight(1f)
                         )
                     }
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Row(modifier = Modifier.fillMaxWidth()) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         StatCard(
                             label = "ITEMS SOLD",
                             value = formatQuantity(uiState.stats.itemsSold),
                             gradient = Brush.linearGradient(listOf(Color(0xFFD97706), Color(0xFFFBBF24))),
                             modifier = Modifier.weight(1f)
                         )
-                        Spacer(modifier = Modifier.width(12.dp))
                         StatCard(
                             label = "INVENTORY VAL",
                             value = formatCurrency(uiState.stats.inventoryValue),
@@ -193,14 +227,9 @@ fun DashboardScreen(
                     SectionHeader(title = "Low Stock Alerts")
                 }
                 item {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp)
-                    ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         uiState.lowStockItems.forEach { item ->
                             LowStockCard(item)
-                            Spacer(modifier = Modifier.height(8.dp))
                         }
                     }
                 }
@@ -212,14 +241,9 @@ fun DashboardScreen(
                     SectionHeader(title = "Top Selling Products")
                 }
                 item {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp)
-                    ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         uiState.topSellingItems.forEach { topItem ->
                             TopItemCard(topItem)
-                            Spacer(modifier = Modifier.height(8.dp))
                         }
                     }
                 }
@@ -227,7 +251,7 @@ fun DashboardScreen(
 
             // Recent Transactions Section
             item {
-                SectionHeader(title = "Recent Sales")
+                SectionHeader(title = "All Transactions")
             }
             if (uiState.recentTransactions.isEmpty()) {
                 item {
@@ -245,16 +269,37 @@ fun DashboardScreen(
                     }
                 }
             } else {
-                items(uiState.recentTransactions) { txn ->
-                    RecentSaleCard(
-                        invoice = txn,
-                        onViewTransaction = onViewTransaction,
-                        onShareClick = { invoice ->
+                items(uiState.recentTransactions, key = { it.transaction.id }) { txn ->
+                    TransactionUiCard(
+                        txn = txn,
+                        onPrint = {
+                            val printerMac = viewModel.getSelectedPrinterAddress()
+                            if (printerMac.isNullOrBlank()) {
+                                Toast.makeText(context, "Printer not connected. Go to Settings to link printer.", Toast.LENGTH_SHORT).show()
+                            } else {
+                                Toast.makeText(context, "Printing...", Toast.LENGTH_SHORT).show()
+                                viewModel.viewModelScope.launch {
+                                    printerManager.printInvoice(printerMac, viewModel.getBusinessProfile(), txn)
+                                }
+                            }
+                        },
+                        onShare = {
                             val profile = viewModel.getBusinessProfile()
-                            InvoiceShareUtility.shareInvoiceAsImage(context, profile, invoice)
-                        }
+                            val dialogOptions = arrayOf("Share as PNG Image", "Share as PDF Document")
+                            android.app.AlertDialog.Builder(context)
+                                .setTitle("Share Invoice #${txn.transaction.id}")
+                                .setItems(dialogOptions) { _, which ->
+                                    if (which == 0) {
+                                        InvoiceShareUtility.shareInvoiceAsImage(context, profile, txn)
+                                    } else {
+                                        InvoiceShareUtility.shareInvoiceAsPdf(context, profile, txn)
+                                    }
+                                }
+                                .show()
+                        },
+                        onEdit = { onEditTransaction(txn) },
+                        onDelete = { selectedTxnForDelete = txn.transaction.id }
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
                 }
             }
         }

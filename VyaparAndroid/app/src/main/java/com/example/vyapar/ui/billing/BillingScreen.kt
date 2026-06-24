@@ -82,8 +82,26 @@ class BillingViewModel(private val repository: DataRepository) : ViewModel() {
         billItems.removeAt(index)
     }
 
+    var editingTransactionId by mutableStateOf<Long?>(null)
+
+    fun startEditing(txn: TransactionWithItems) {
+        editingTransactionId = txn.transaction.id
+        billItems.clear()
+        txn.items.forEach { item ->
+            billItems.add(
+                BillLineItem(
+                    code = item.itemCode,
+                    name = item.itemName,
+                    quantity = item.quantity,
+                    rate = item.rate
+                )
+            )
+        }
+    }
+
     fun clearBill() {
         billItems.clear()
+        editingTransactionId = null
     }
 
     suspend fun commitSaleAndGetInvoice(): TransactionWithItems? {
@@ -100,7 +118,7 @@ class BillingViewModel(private val repository: DataRepository) : ViewModel() {
 
         val items = billItems.map { lineItem ->
             TransactionItemEntity(
-                transactionId = 0L,
+                transactionId = editingTransactionId ?: 0L,
                 itemCode = lineItem.code,
                 itemName = lineItem.name,
                 quantity = lineItem.quantity,
@@ -109,12 +127,19 @@ class BillingViewModel(private val repository: DataRepository) : ViewModel() {
             )
         }
 
-        // Commit to Room DB
-        repository.insertSale(transaction, items)
+        val txnId = editingTransactionId
+        if (txnId != null) {
+            repository.updateSale(txnId, transaction.copy(id = txnId), items)
+        } else {
+            repository.insertSale(transaction, items)
+        }
 
         // Retrieve the saved transaction with generated ID
         val txns = repository.getTransactionsFlow().stateIn(viewModelScope).value
-        val savedInvoice = txns.firstOrNull { it.transaction.date == date && it.transaction.total == total }
+        val savedInvoice = txns.firstOrNull { 
+            if (txnId != null) it.transaction.id == txnId
+            else it.transaction.date == date && it.transaction.total == total 
+        }
         
         // Clear bill list after saving
         clearBill()
@@ -173,10 +198,83 @@ fun BillingScreen(
         showSuggestions = false
     }
 
+    var savedInvoiceForOptions by remember { mutableStateOf<TransactionWithItems?>(null) }
+
+    if (savedInvoiceForOptions != null) {
+        val invoice = savedInvoiceForOptions!!
+        val profile = viewModel.getBusinessProfile()
+        val printerAddress = viewModel.getSelectedPrinterAddress()
+        
+        AlertDialog(
+            onDismissRequest = {
+                savedInvoiceForOptions = null
+                onBackClick()
+            },
+            title = { Text("Invoice Saved!", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Invoice #${invoice.transaction.id} for ${formatCurrency(invoice.transaction.grandTotal)} has been successfully saved.")
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Button(
+                        onClick = {
+                            if (printerAddress != null) {
+                                viewModel.viewModelScope.launch {
+                                    Toast.makeText(context, "Connecting to printer...", Toast.LENGTH_SHORT).show()
+                                    val printResult = printerManager.printInvoice(printerAddress, profile, invoice)
+                                    if (printResult.isSuccess) {
+                                        Toast.makeText(context, "Printed successfully!", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        Toast.makeText(context, "Print failed: ${printResult.exceptionOrNull()?.message}", Toast.LENGTH_LONG).show()
+                                    }
+                                }
+                            } else {
+                                Toast.makeText(context, "Printer not paired. Configure printer in Settings.", Toast.LENGTH_LONG).show()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16A34A)),
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("🖨️ Print Receipt")
+                    }
+                    
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                        OutlinedButton(
+                            onClick = { InvoiceShareUtility.shareInvoiceAsImage(context, profile, invoice) },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("🖼️ Share PNG", fontSize = 12.sp)
+                        }
+                        
+                        OutlinedButton(
+                            onClick = { InvoiceShareUtility.shareInvoiceAsPdf(context, profile, invoice) },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("📄 Share PDF", fontSize = 12.sp)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        savedInvoiceForOptions = null
+                        onBackClick()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB))
+                ) {
+                    Text("Done")
+                }
+            }
+        )
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("New Tax Invoice", fontWeight = FontWeight.Bold) },
+                title = { Text(if (viewModel.editingTransactionId != null) "Edit Tax Invoice #${viewModel.editingTransactionId}" else "New Tax Invoice", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onBackClick) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back")
@@ -400,63 +498,24 @@ fun BillingScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(16.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        horizontalArrangement = Arrangement.Center
                     ) {
-                        // Share Image Button
-                        OutlinedButton(
-                            onClick = {
-                                viewModel.viewModelScope.launch {
-                                    val profile = viewModel.getBusinessProfile()
-                                    // Save the sale temporarily to share
-                                    val invoice = viewModel.commitSaleAndGetInvoice()
-                                    if (invoice != null) {
-                                        InvoiceShareUtility.shareInvoiceAsImage(context, profile, invoice)
-                                        Toast.makeText(context, "Invoice Saved and Shared!", Toast.LENGTH_SHORT).show()
-                                    } else {
-                                        Toast.makeText(context, "Failed to create invoice", Toast.LENGTH_SHORT).show()
-                                    }
-                                }
-                            },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Icon(Icons.Default.Share, contentDescription = "Share", modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Share Image", fontSize = 12.sp)
-                        }
-
-                        Spacer(modifier = Modifier.width(10.dp))
-
-                        // Print & Save Button
                         Button(
                             onClick = {
                                 viewModel.viewModelScope.launch {
-                                    val printerAddress = viewModel.getSelectedPrinterAddress()
-                                    val profile = viewModel.getBusinessProfile()
                                     val invoice = viewModel.commitSaleAndGetInvoice()
-
                                     if (invoice != null) {
-                                        if (printerAddress != null && printerManager.hasBluetoothPermission()) {
-                                            Toast.makeText(context, "Connecting to printer...", Toast.LENGTH_SHORT).show()
-                                            val printResult = printerManager.printInvoice(printerAddress, profile, invoice)
-                                            if (printResult.isSuccess) {
-                                                Toast.makeText(context, "Printed successfully!", Toast.LENGTH_SHORT).show()
-                                            } else {
-                                                Toast.makeText(context, "Print failed: ${printResult.exceptionOrNull()?.message}", Toast.LENGTH_LONG).show()
-                                            }
-                                        } else {
-                                            Toast.makeText(context, "Invoice Saved! (No printer paired in Settings)", Toast.LENGTH_LONG).show()
-                                        }
+                                        savedInvoiceForOptions = invoice
                                     } else {
                                         Toast.makeText(context, "Error saving invoice", Toast.LENGTH_SHORT).show()
                                     }
                                 }
                             },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16A34A)),
-                            modifier = Modifier.weight(1.2f),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
+                            modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(8.dp)
                         ) {
-                            Text("Print & Save", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Text("Save Invoice", fontWeight = FontWeight.Bold, fontSize = 15.sp)
                         }
                     }
                 }
