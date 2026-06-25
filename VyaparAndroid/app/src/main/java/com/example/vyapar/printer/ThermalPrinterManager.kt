@@ -368,6 +368,7 @@ class ThermalPrinterManager(private val context: Context) {
 
     private fun compileReceiptBytes(profile: BusinessProfile, invoice: TransactionWithItems): ByteArray {
         val bytes = mutableListOf<Byte>()
+        val W = 32 // 58mm thermal = 32 chars per line
 
         // Commands
         val init = byteArrayOf(0x1B, 0x40) // Initialize
@@ -379,110 +380,179 @@ class ThermalPrinterManager(private val context: Context) {
         val sizeDouble = byteArrayOf(0x1D, 0x21, 0x11)
         val sizeNormal = byteArrayOf(0x1D, 0x21, 0x00)
 
-        fun writeBytes(arr: ByteArray) {
+        fun esc(arr: ByteArray) {
             bytes.addAll(arr.toList())
         }
 
-        fun writeText(text: String) {
-            bytes.addAll(text.toByteArray(Charsets.US_ASCII).toList())
+        fun line(text: String) {
+            bytes.addAll(text.toByteArray(Charsets.UTF_8).toList())
+            bytes.add(0x0A)
         }
 
-        // Initialize
-        writeBytes(init)
-
-        // Business Name
-        writeBytes(alignCenter)
-        writeBytes(sizeDouble)
-        writeBytes(boldOn)
-        writeText("${profile.name}\n")
-        writeBytes(sizeNormal)
-        writeBytes(boldOff)
-
-        // Phone & Address
-        if (profile.phone.isNotBlank()) {
-            writeText("Tel: ${profile.phone}\n")
-        }
-        if (profile.address.isNotBlank()) {
-            writeText("${profile.address}\n")
+        fun blankLine() {
+            bytes.add(0x0A)
         }
 
-        // Divider
-        writeBytes(alignLeft)
-        writeText("--------------------------------\n")
-
-        // Invoice metadata
-        val sdf = SimpleDateFormat("dd-MMM-yyyy hh:mm a", Locale.getDefault())
-        val dateStr = sdf.format(Date(invoice.transaction.date))
-        writeText("Invoice #: ${invoice.transaction.id}\n")
-        writeText("Date: $dateStr\n")
-        writeText("Payment: ${if (invoice.transaction.isPaid) "Paid" else "Unpaid"}\n")
-        writeText("--------------------------------\n")
-
-        // Column Headers
-        writeBytes(boldOn)
-        writeText(formatRow("Item Description", "Amount"))
-        writeText("\n")
-        writeBytes(boldOff)
-        writeText("--------------------------------\n")
-
-        // Items list
-        for (item in invoice.items) {
-            // Print item name
-            writeText("${item.itemName}\n")
-            // Print rate x qty and subtotal
-            val qtyStr = if (item.quantity % 1.0 == 0.0) item.quantity.toInt().toString() else String.format("%.2f", item.quantity)
-            val rateStr = String.format("%.2f", item.rate)
-            val amtStr = String.format("%.2f", item.amount)
-            val detailRow = formatRow("  $qtyStr x $rateStr", amtStr)
-            writeText("$detailRow\n")
+        fun dashes() {
+            line("-".repeat(W))
         }
 
-        writeText("--------------------------------\n")
-
-        // Total Summary
-        val totalLabel = "TOTAL"
-        val totalVal = String.format("%.2f", invoice.transaction.total)
-        writeBytes(boldOn)
-        writeText(formatRow(totalLabel, totalVal))
-        writeText("\n")
-        writeBytes(boldOff)
-
-        if (invoice.transaction.discount > 0.0) {
-            val discLabel = "Discount"
-            val discVal = String.format("-%.2f", invoice.transaction.discount)
-            writeText(formatRow(discLabel, discVal))
-            writeText("\n")
-            val grandLabel = "GRAND TOTAL"
-            val grandVal = String.format("%.2f", invoice.transaction.grandTotal)
-            writeBytes(boldOn)
-            writeText(formatRow(grandLabel, grandVal))
-            writeText("\n")
-            writeBytes(boldOff)
+        // Format number: no trailing zeros, but keep meaningful decimals
+        fun n(v: Double): String {
+            if (v == Math.floor(v) && !v.isInfinite()) return v.toLong().toString()
+            val s = String.format(Locale.US, "%.2f", v)
+            return if (s.endsWith("0") && !s.endsWith(".0")) s.trimEnd('0') else s
         }
 
-        writeText("--------------------------------\n")
+        // Build a 32-char line with left text and right text
+        fun leftRight(left: String, right: String): String {
+            val gap = W - left.length - right.length
+            return if (gap > 0) left + " ".repeat(gap) + right else "$left $right"
+        }
 
-        // Footer
-        writeBytes(alignCenter)
-        writeText("Thank you for your purchase!\n")
-        writeText("Please visit again.\n")
+        // Initialize printer
+        esc(init)
+
+        // Business Name & details (optional, but standard for POS bills)
+        if (profile.name.isNotBlank()) {
+            esc(alignCenter)
+            esc(sizeDouble)
+            esc(boldOn)
+            line(profile.name)
+            esc(sizeNormal)
+            esc(boldOff)
+
+            if (profile.phone.isNotBlank()) {
+                line("Tel: ${profile.phone}")
+            }
+            if (profile.address.isNotBlank()) {
+                line(profile.address)
+            }
+            blankLine()
+        }
+
+        // ── Date / Time ──
+        val dateFmt = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+        val timeFmt = SimpleDateFormat("hh:mm a", Locale.getDefault())
+        val dateObj = Date(invoice.transaction.date)
+        val dateStr = dateFmt.format(dateObj)
+        val timeStr = timeFmt.format(dateObj)
+        val invoiceId = invoice.transaction.id.toString()
+
+        // ════════════════════════════════════════
+        // 1. HEADER — centered
+        // ════════════════════════════════════════
+        esc(alignCenter)
+        esc(boldOn)
+        line("Invoice")
+        esc(boldOff)
+        blankLine()
+
+        // ════════════════════════════════════════
+        // 2. Invoice No / Date / Time — left+right
+        // ════════════════════════════════════════
+        esc(alignLeft)
+        line(leftRight("Invoice No:$invoiceId", "Date:$dateStr"))
+        line(leftRight("70", "Time:$timeStr"))
+        blankLine()
+        dashes()
+
+        // ════════════════════════════════════════
+        // 3. Cash Sale — centered, bold
+        // ════════════════════════════════════════
+        esc(alignCenter)
+        esc(boldOn)
+        line(if (invoice.transaction.isPaid) "Cash Sale" else "Credit Sale")
+        esc(boldOff)
+        dashes()
+
+        // ════════════════════════════════════════
+        // 4. COLUMN HEADER — left-aligned
+        // ════════════════════════════════════════
+        esc(alignLeft)
+        // Column layout (32 chars total):
+        //   Col A (serial#) : 3 chars  (positions 1-3)
+        //   Col B (qty)     : 14 chars (positions 4-17)
+        //   Col C (price)   : 5 chars  (positions 18-22)
+        //   Col D (amount)  : 10 chars (positions 23-32)
+        //
+        // Header line 1: "#  Item Name"
+        // Header line 2: "   Quantity      Price    Amount"
+        esc(boldOn)
+        line("#  Item Name")
+        line("   Quantity      Price    Amount")
+        esc(boldOff)
+        dashes()
+
+        // ════════════════════════════════════════
+        // 5. ITEM ROWS — two lines per item
+        // ════════════════════════════════════════
+        var subtotal = 0.0
+        invoice.items.forEachIndexed { index, item ->
+            val serial = (index + 1).toString()
+            val name   = item.itemName.take(29)
+            val qty    = n(item.quantity)
+            val price  = n(item.rate)
+            val amount = n(item.amount)
+            subtotal += item.amount
+
+            // Line 1: serial# left-padded to 3 chars + name
+            line(serial.padEnd(3) + name)
+
+            // Line 2: 3 spaces + qty (14) + price (5) + amount (10)
+            line("   " + qty.padEnd(14) + price.padStart(5) + amount.padStart(10))
+        }
+
+        // ════════════════════════════════════════
+        // 6. ITEMS COUNT + SUBTOTAL
+        // ════════════════════════════════════════
+        dashes()
+        val itemsLeft = "Items: ${invoice.items.size}"
+        val subtotalRight = n(subtotal)
+        line(leftRight(itemsLeft, subtotalRight))
+
+        // ════════════════════════════════════════
+        // 7. TOTALS — label left, value right
+        // ════════════════════════════════════════
+        dashes()
+        blankLine()
+
+        val grandTotal = invoice.transaction.grandTotal
+        val received = if (invoice.transaction.isPaid) grandTotal else 0.0
+        val balance = grandTotal - received
+
+        // Format: "Total     :           283"
+        fun totalLine(label: String, value: String) {
+            val labelPart = label.padEnd(10) + ":"
+            val valuePart = value.padStart(W - labelPart.length)
+            line(labelPart + valuePart)
+        }
+
+        esc(boldOn)
+        totalLine("Total", n(grandTotal))
+        blankLine()
+        totalLine("Received", n(received))
+        blankLine()
+        totalLine("Balance", n(balance))
+        esc(boldOff)
+
+        blankLine()
+        dashes()
+
+        // ════════════════════════════════════════
+        // 8. FOOTER — centered
+        // ════════════════════════════════════════
+        esc(alignCenter)
+        esc(boldOn)
+        line("Terms & Conditions")
+        esc(boldOff)
+        blankLine()
+        line("Thank you for doing business")
+        line("with us!")
 
         // Feed paper
-        writeBytes(byteArrayOf(0x1B, 0x64, 0x05)) // Feed 5 lines
+        esc(byteArrayOf(0x1B, 0x64, 0x05)) // Feed 5 lines
 
         return bytes.toByteArray()
-    }
-
-    private fun formatRow(left: String, right: String, limit: Int = 32): String {
-        val totalLen = left.length + right.length
-        if (totalLen >= limit) {
-            val leftLimit = limit - right.length - 1
-            if (leftLimit > 0) {
-                return left.substring(0, leftLimit) + " " + right
-            }
-            return left.substring(0, limit)
-        }
-        val spaces = limit - totalLen
-        return left + "".padEnd(spaces) + right
     }
 }
