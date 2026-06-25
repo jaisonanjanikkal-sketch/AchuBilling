@@ -41,8 +41,6 @@ class ThermalPrinterManager(private val context: Context) {
     companion object {
         private const val TAG = "BLEPrinter"
         private const val SCAN_TIMEOUT_MS = 10_000L // 10 seconds
-        private const val CHUNK_SIZE = 64 // BLE write chunk size
-        private const val CHUNK_DELAY_MS = 100L // delay between chunks
 
         // Common BLE thermal printer service/characteristic UUIDs
         private val KNOWN_PRINTER_SERVICE_UUIDS = listOf(
@@ -120,7 +118,6 @@ class ThermalPrinterManager(private val context: Context) {
                 val existing = discoveredDevices[address]
                 if (existing == null || (existing.name.startsWith("Unknown") && rawName != null)) {
                     discoveredDevices[address] = BleScanResultItem(name, address, device)
-                    Log.d(TAG, "BLE Device found: $name ($address)")
                 }
             }
 
@@ -270,7 +267,33 @@ class ThermalPrinterManager(private val context: Context) {
                 // Write data in chunks on a background thread
                 Thread {
                     try {
-                        writeDataInChunks(g, writeChar, data)
+                        // 2. Initialize and Calibrate
+                        writeToPrinter(g, writeChar, byteArrayOf(0x1B, 0x40)) // Initialize
+                        Thread.sleep(100)
+                        writeToPrinter(g, writeChar, byteArrayOf(0x1D, 0x28, 0x41, 0x00, 0x00, 0x00)) // Calibrate
+                        Thread.sleep(100)
+
+                        // 3. Set Label Mode (for gap paper)
+                        writeToPrinter(g, writeChar, byteArrayOf(0x1B, 0x63, 0x34, 0x00))
+                        Thread.sleep(50)
+
+                        // 4. Convert text to bytes and split into chunks
+                        val chunkSize = 256 // Increased for speed
+                        val delayMs = 20L // Reduced for speed
+                        var offset = 0
+                        while (offset < data.size) {
+                            val end = minOf(offset + chunkSize, data.size)
+                            val chunk = data.copyOfRange(offset, end)
+                            writeToPrinter(g, writeChar, chunk)
+                            offset = end
+                            Thread.sleep(delayMs)
+                        }
+
+                        // 5. Feed and Cut
+                        writeToPrinter(g, writeChar, byteArrayOf(0x0A, 0x0A, 0x0A, 0x0A))
+                        Thread.sleep(100)
+                        writeToPrinter(g, writeChar, byteArrayOf(0x1D, 0x56, 0x42)) // Full cut
+
                         handler.removeCallbacks(timeoutRunnable)
                         // Small delay to let the printer finish
                         Thread.sleep(500)
@@ -344,34 +367,23 @@ class ThermalPrinterManager(private val context: Context) {
     }
 
     @SuppressLint("MissingPermission")
-    private fun writeDataInChunks(
+    private fun writeToPrinter(
         gatt: BluetoothGatt,
         characteristic: BluetoothGattCharacteristic,
-        data: ByteArray
+        bytes: ByteArray
     ) {
-        var offset = 0
-        while (offset < data.size) {
-            val end = minOf(offset + CHUNK_SIZE, data.size)
-            val chunk = data.copyOfRange(offset, end)
+        characteristic.value = bytes
+        // Use WRITE_NO_RESPONSE if supported for speed, else standard WRITE
+        characteristic.writeType =
+            if ((characteristic.properties and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) != 0)
+                BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+            else
+                BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
 
-            characteristic.value = chunk
-            // Use WRITE_NO_RESPONSE if supported for speed, else standard WRITE
-            characteristic.writeType =
-                if ((characteristic.properties and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) != 0)
-                    BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
-                else
-                    BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
-
-            val success = gatt.writeCharacteristic(characteristic)
-            if (!success) {
-                throw Exception("Failed to write chunk at offset $offset")
-            }
-
-            offset = end
-            // Small delay to avoid overwhelming the BLE buffer
-            Thread.sleep(CHUNK_DELAY_MS)
+        val success = gatt.writeCharacteristic(characteristic)
+        if (!success) {
+            throw Exception("Failed to write to printer")
         }
-        Log.d(TAG, "Successfully wrote ${data.size} bytes in ${(data.size + CHUNK_SIZE - 1) / CHUNK_SIZE} chunks")
     }
 
     // ─── ESC/POS Receipt Formatting ─────────────────────────────────────
@@ -396,9 +408,6 @@ class ThermalPrinterManager(private val context: Context) {
         fun writeText(text: String) {
             bytes.addAll(text.toByteArray(Charsets.US_ASCII).toList())
         }
-
-        // Initialize
-        writeBytes(init)
 
         // Business Name
         writeBytes(alignCenter)
@@ -476,11 +485,6 @@ class ThermalPrinterManager(private val context: Context) {
         writeBytes(alignCenter)
         writeText("Thank you for your purchase!\n")
         writeText("Please visit again.\n")
-
-        // Feed paper
-        writeBytes(byteArrayOf(0x0A, 0x0A, 0x0A, 0x0A)) // 4 Line Feeds (0x0A)
-        // Cut paper
-        writeBytes(byteArrayOf(0x1D, 0x56, 0x42, 0x00)) // Cut paper (using 0x1D, 0x56, 0x42, 0x00)
 
         return bytes.toByteArray()
     }
