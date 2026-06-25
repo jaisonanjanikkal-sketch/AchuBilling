@@ -179,15 +179,16 @@ fun BillingScreen(
 
     var itemNameInput by remember { mutableStateOf("") }
     var rateInput by remember { mutableStateOf("") }
-    var qtyInput by remember { mutableStateOf("1") }
+    var qtyInput by remember { mutableStateOf("") }
     
     var showSuggestions by remember { mutableStateOf(false) }
     val itemNameFocusRequester = remember { FocusRequester() }
+    val qtyFocusRequester = remember { FocusRequester() }
 
     fun addCurrentItem() {
         val name = itemNameInput.trim()
         val rate = rateInput.toDoubleOrNull() ?: 0.0
-        val qty = qtyInput.toDoubleOrNull() ?: 0.0
+        val qty = if (qtyInput.isBlank()) 1.0 else qtyInput.toDoubleOrNull() ?: 0.0
 
         if (name.isBlank()) {
             Toast.makeText(context, "Please enter item name", Toast.LENGTH_SHORT).show()
@@ -207,7 +208,7 @@ fun BillingScreen(
         // Reset inputs
         itemNameInput = ""
         rateInput = ""
-        qtyInput = "1"
+        qtyInput = ""
         showSuggestions = false
         // Return focus to product name field for rapid entry
         itemNameFocusRequester.requestFocus()
@@ -364,8 +365,9 @@ fun BillingScreen(
                                                 .clickable {
                                                     itemNameInput = item.name
                                                     rateInput = item.salePrice.toString()
-                                                    qtyInput = "1"
+                                                    qtyInput = ""
                                                     showSuggestions = false
+                                                    qtyFocusRequester.requestFocus()
                                                 }
                                                 .padding(14.dp),
                                             horizontalArrangement = Arrangement.SpaceBetween
@@ -390,11 +392,11 @@ fun BillingScreen(
 
                     Row(modifier = Modifier.fillMaxWidth()) {
                         OutlinedTextField(
-                            value = rateInput,
-                            onValueChange = { rateInput = it },
-                            label = { Text("Rate (₹)") },
+                            value = qtyInput,
+                            onValueChange = { qtyInput = it },
+                            label = { Text("Qty") },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            modifier = Modifier.weight(1.2f),
+                            modifier = Modifier.weight(0.8f).focusRequester(qtyFocusRequester),
                             singleLine = true,
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedTextColor = Color.Black,
@@ -405,11 +407,11 @@ fun BillingScreen(
                         )
                         Spacer(modifier = Modifier.width(10.dp))
                         OutlinedTextField(
-                            value = qtyInput,
-                            onValueChange = { qtyInput = it },
-                            label = { Text("Qty") },
+                            value = rateInput,
+                            onValueChange = { rateInput = it },
+                            label = { Text("Rate (₹)") },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            modifier = Modifier.weight(0.8f),
+                            modifier = Modifier.weight(1.2f),
                             singleLine = true,
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedTextColor = Color.Black,

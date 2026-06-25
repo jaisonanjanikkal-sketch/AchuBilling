@@ -41,6 +41,8 @@ class ThermalPrinterManager(private val context: Context) {
     companion object {
         private const val TAG = "BLEPrinter"
         private const val SCAN_TIMEOUT_MS = 10_000L // 10 seconds
+        private const val CHUNK_SIZE = 20 // BLE MTU default write chunk
+        private const val CHUNK_DELAY_MS = 50L // delay between chunks
 
         // Common BLE thermal printer service/characteristic UUIDs
         private val KNOWN_PRINTER_SERVICE_UUIDS = listOf(
@@ -222,23 +224,14 @@ class ThermalPrinterManager(private val context: Context) {
         val gattCallback = object : BluetoothGattCallback() {
             override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
                 if (newState == BluetoothProfile.STATE_CONNECTED) {
-                    Log.d(TAG, "GATT connected, requesting MTU...")
-                    val mtuSuccess = g.requestMtu(128)
-                    if (!mtuSuccess) {
-                        Log.w(TAG, "Request MTU failed, starting service discovery directly")
-                        g.discoverServices()
-                    }
+                    Log.d(TAG, "GATT connected, discovering services...")
+                    g.discoverServices()
                 } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                     Log.d(TAG, "GATT disconnected")
                     if (!resumed) {
                         safeResume(Result.failure(Exception("Printer disconnected unexpectedly")))
                     }
                 }
-            }
-
-            override fun onMtuChanged(g: BluetoothGatt, mtu: Int, status: Int) {
-                Log.d(TAG, "MTU changed to $mtu, status=$status. Discovering services...")
-                g.discoverServices()
             }
 
             override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
@@ -267,33 +260,7 @@ class ThermalPrinterManager(private val context: Context) {
                 // Write data in chunks on a background thread
                 Thread {
                     try {
-                        // 2. Initialize and Calibrate
-                        writeToPrinter(g, writeChar, byteArrayOf(0x1B, 0x40)) // Initialize
-                        Thread.sleep(100)
-                        writeToPrinter(g, writeChar, byteArrayOf(0x1D, 0x28, 0x41, 0x00, 0x00, 0x00)) // Calibrate
-                        Thread.sleep(100)
-
-                        // 3. Set Label Mode (for gap paper)
-                        writeToPrinter(g, writeChar, byteArrayOf(0x1B, 0x63, 0x34, 0x00))
-                        Thread.sleep(50)
-
-                        // 4. Convert text to bytes and split into chunks
-                        val chunkSize = 256 // Increased for speed
-                        val delayMs = 20L // Reduced for speed
-                        var offset = 0
-                        while (offset < data.size) {
-                            val end = minOf(offset + chunkSize, data.size)
-                            val chunk = data.copyOfRange(offset, end)
-                            writeToPrinter(g, writeChar, chunk)
-                            offset = end
-                            Thread.sleep(delayMs)
-                        }
-
-                        // 5. Feed and Cut
-                        writeToPrinter(g, writeChar, byteArrayOf(0x0A, 0x0A, 0x0A, 0x0A))
-                        Thread.sleep(100)
-                        writeToPrinter(g, writeChar, byteArrayOf(0x1D, 0x56, 0x42)) // Full cut
-
+                        writeDataInChunks(g, writeChar, data)
                         handler.removeCallbacks(timeoutRunnable)
                         // Small delay to let the printer finish
                         Thread.sleep(500)
@@ -367,23 +334,34 @@ class ThermalPrinterManager(private val context: Context) {
     }
 
     @SuppressLint("MissingPermission")
-    private fun writeToPrinter(
+    private fun writeDataInChunks(
         gatt: BluetoothGatt,
         characteristic: BluetoothGattCharacteristic,
-        bytes: ByteArray
+        data: ByteArray
     ) {
-        characteristic.value = bytes
-        // Use WRITE_NO_RESPONSE if supported for speed, else standard WRITE
-        characteristic.writeType =
-            if ((characteristic.properties and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) != 0)
-                BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
-            else
-                BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+        var offset = 0
+        while (offset < data.size) {
+            val end = minOf(offset + CHUNK_SIZE, data.size)
+            val chunk = data.copyOfRange(offset, end)
 
-        val success = gatt.writeCharacteristic(characteristic)
-        if (!success) {
-            throw Exception("Failed to write to printer")
+            characteristic.value = chunk
+            // Use WRITE_NO_RESPONSE if supported for speed, else standard WRITE
+            characteristic.writeType =
+                if ((characteristic.properties and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) != 0)
+                    BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+                else
+                    BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+
+            val success = gatt.writeCharacteristic(characteristic)
+            if (!success) {
+                throw Exception("Failed to write chunk at offset $offset")
+            }
+
+            offset = end
+            // Small delay to avoid overwhelming the BLE buffer
+            Thread.sleep(CHUNK_DELAY_MS)
         }
+        Log.d(TAG, "Successfully wrote ${data.size} bytes in ${(data.size + CHUNK_SIZE - 1) / CHUNK_SIZE} chunks")
     }
 
     // ─── ESC/POS Receipt Formatting ─────────────────────────────────────
@@ -408,6 +386,9 @@ class ThermalPrinterManager(private val context: Context) {
         fun writeText(text: String) {
             bytes.addAll(text.toByteArray(Charsets.US_ASCII).toList())
         }
+
+        // Initialize
+        writeBytes(init)
 
         // Business Name
         writeBytes(alignCenter)
@@ -485,6 +466,9 @@ class ThermalPrinterManager(private val context: Context) {
         writeBytes(alignCenter)
         writeText("Thank you for your purchase!\n")
         writeText("Please visit again.\n")
+
+        // Feed paper
+        writeBytes(byteArrayOf(0x1B, 0x64, 0x05)) // Feed 5 lines
 
         return bytes.toByteArray()
     }

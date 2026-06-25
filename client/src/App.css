@@ -1261,3 +1261,109 @@ html, body {
 .menu-item[disabled]:hover {
   background: none;
 }
+
+/* ===== DASHBOARD SUBVIEWS & MENU CARDS ===== */
+.dash-menu-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+.dash-menu-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px;
+  background: var(--card);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.dash-menu-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+  border-color: var(--primary-light);
+}
+.dash-menu-icon {
+  width: 46px;
+  height: 46px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  flex-shrink: 0;
+  transition: transform 0.2s ease;
+}
+.dash-menu-card:hover .dash-menu-icon {
+  transform: scale(1.1);
+}
+.dash-menu-info {
+  flex: 1;
+  min-width: 0;
+}
+.dash-menu-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+.dash-menu-subtitle {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+.dash-menu-arrow {
+  color: var(--text-tertiary);
+  font-size: 16px;
+  transition: transform 0.2s ease;
+}
+.dash-menu-card:hover .dash-menu-arrow {
+  color: var(--primary);
+  transform: translateX(4px);
+}
+
+/* Subpage styling */
+.subview-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+.subview-back-btn {
+  background: var(--bg);
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  transition: all 0.2s ease;
+}
+.subview-back-btn:hover {
+  background: var(--primary-light);
+  color: var(--primary);
+}
+.subview-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+}
+.subview-content {
+  padding: 16px;
+}
+.subview-search-bar {
+  padding-bottom: 14px;
+}
+
