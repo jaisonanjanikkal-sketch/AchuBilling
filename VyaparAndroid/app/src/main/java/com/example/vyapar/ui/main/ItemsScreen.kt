@@ -30,6 +30,8 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 
 class ItemsViewModel(private val repository: DataRepository) : ViewModel() {
     val searchQuery = MutableStateFlow("")
@@ -39,23 +41,27 @@ class ItemsViewModel(private val repository: DataRepository) : ViewModel() {
         .flatMapLatest { query ->
             repository.searchItemsFlow(query)
         }
-        .flowOn(kotlinx.coroutines.Dispatchers.Default)
+        .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     fun saveItem(code: String, name: String, salePrice: Double, stock: Double) {
         viewModelScope.launch {
-            val existing = repository.getItemByCode(code)
-            if (existing != null) {
-                repository.updateItem(existing.copy(name = name, salePrice = salePrice, stock = stock))
-            } else {
-                repository.insertItem(ItemEntity(code = code, name = name, salePrice = salePrice, stock = stock))
+            withContext(Dispatchers.IO) {
+                val existing = repository.getItemByCode(code)
+                if (existing != null) {
+                    repository.updateItem(existing.copy(name = name, salePrice = salePrice, stock = stock))
+                } else {
+                    repository.insertItem(ItemEntity(code = code, name = name, salePrice = salePrice, stock = stock))
+                }
             }
         }
     }
 
     fun deleteItem(item: ItemEntity) {
         viewModelScope.launch {
-            repository.deleteItem(item)
+            withContext(Dispatchers.IO) {
+                repository.deleteItem(item)
+            }
         }
     }
 }

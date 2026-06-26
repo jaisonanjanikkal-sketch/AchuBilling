@@ -1,5 +1,6 @@
 package com.example.vyapar.data
 
+import androidx.compose.runtime.Immutable
 import androidx.room.Dao
 import androidx.room.Embedded
 import androidx.room.Insert
@@ -9,6 +10,7 @@ import androidx.room.Relation
 import androidx.room.Transaction
 import kotlinx.coroutines.flow.Flow
 
+@Immutable
 data class TransactionWithItems(
     @Embedded val transaction: TransactionEntity,
     @Relation(
@@ -18,6 +20,7 @@ data class TransactionWithItems(
     val items: List<TransactionItemEntity>
 )
 
+@Immutable
 data class TopSellingQueryResult(
     val itemCode: String,
     val itemName: String,

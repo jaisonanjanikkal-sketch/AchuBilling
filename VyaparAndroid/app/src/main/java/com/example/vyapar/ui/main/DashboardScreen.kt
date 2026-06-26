@@ -33,6 +33,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -46,6 +47,7 @@ import com.example.vyapar.printer.ThermalPrinterManager
 import android.widget.Toast
 
 // ViewModel and State definitions
+@Immutable
 data class DashboardStats(
     val totalRevenue: Double = 0.0,
     val avgInvoice: Double = 0.0,
@@ -53,9 +55,13 @@ data class DashboardStats(
     val inventoryValue: Double = 0.0
 )
 
+@Immutable
 data class DashboardState(
     val stats: DashboardStats = DashboardStats(),
     val lowStockItems: List<ItemEntity> = emptyList(),
+    val lowStockAlertItems: List<ItemEntity> = emptyList(),
+    val lowStockCount: Int = 0,
+    val lowStockSummary: String = "",
     val topSellingItems: List<TopSellingItem> = emptyList(),
     val recentTransactions: List<TransactionWithItems> = emptyList()
 )
@@ -88,9 +94,20 @@ class DashboardViewModel(private val repository: DataRepository) : ViewModel() {
             TopSellingItem(entry.key, name, entry.value, pct)
         }
 
+        val lowStockAlerts = lowStock.filter { it.stock <= 0.0 }
+        val lowStockCount = lowStockAlerts.size
+        val lowStockSummary = if (lowStockCount == 0) {
+            "All items have healthy stock levels"
+        } else {
+            "$lowStockCount items needing attention"
+        }
+
         DashboardState(
             stats = DashboardStats(totalRevenue, avgInvoice, itemsSold, inventoryValue),
             lowStockItems = lowStock,
+            lowStockAlertItems = lowStockAlerts,
+            lowStockCount = lowStockCount,
+            lowStockSummary = lowStockSummary,
             topSellingItems = topSelling,
             recentTransactions = txns // Fetch all transactions to match React dashboard
         )
@@ -103,7 +120,9 @@ class DashboardViewModel(private val repository: DataRepository) : ViewModel() {
 
     fun deleteTransaction(id: Long) {
         viewModelScope.launch {
-            repository.deleteTransaction(id)
+            withContext(Dispatchers.IO) {
+                repository.deleteTransaction(id)
+            }
         }
     }
 }
@@ -194,12 +213,7 @@ fun DashboardScreen(
             // Dashboard Navigation Cards Section
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    val lowStockCount = uiState.lowStockItems.filter { it.stock <= 0 }.size
-                    val lowStockSummary = if (lowStockCount == 0) {
-                        "All items have healthy stock levels"
-                    } else {
-                        "$lowStockCount items needing attention"
-                    }
+                    val lowStockSummary = uiState.lowStockSummary
                     DashboardMenuCard(
                         title = "Low Stock Alerts",
                         subtitle = lowStockSummary,
@@ -389,8 +403,8 @@ fun RecentSaleCard(
             Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(text = "Cash Sale", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
-                val sdf = SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault())
-                val timeStr = sdf.format(Date(invoice.transaction.date))
+                val sdf = remember { SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault()) }
+                val timeStr = remember(invoice.transaction.date) { sdf.format(Date(invoice.transaction.date)) }
                 val itemsCount = invoice.items.size
                 Text(
                     text = "#${invoice.transaction.id} · $timeStr · $itemsCount item${if (itemsCount != 1) "s" else ""}",

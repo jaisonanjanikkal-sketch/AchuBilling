@@ -63,14 +63,16 @@ fun TransactionsScreen(
         )
     }
 
-    val filteredTransactions = uiState.recentTransactions.filter { txn ->
-        if (searchQuery.isBlank()) {
-            true
-        } else {
-            val query = searchQuery.lowercase()
-            val matchId = txn.transaction.id.toString().contains(query)
-            val matchItem = txn.items.any { it.itemName.lowercase().contains(query) }
-            matchId || matchItem
+    val filteredTransactions = remember(uiState.recentTransactions, searchQuery) {
+        uiState.recentTransactions.filter { txn ->
+            if (searchQuery.isBlank()) {
+                true
+            } else {
+                val query = searchQuery.lowercase()
+                val matchId = txn.transaction.id.toString().contains(query)
+                val matchItem = txn.items.any { it.itemName.lowercase().contains(query) }
+                matchId || matchItem
+            }
         }
     }
 

@@ -33,6 +33,13 @@ fun TopSellingScreen(
     val selectedFilter by viewModel.selectedFilter.collectAsState()
     val customRange by viewModel.customDateRange.collectAsState()
 
+    val customRangeSdf = remember { SimpleDateFormat("MM/dd", Locale.getDefault()) }
+    val formattedCustomRange = remember(customRange) {
+        customRange?.let { (start, end) ->
+            "${customRangeSdf.format(Date(start))} - ${customRangeSdf.format(Date(end))}"
+        }
+    }
+
     var showDateRangePicker by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -81,10 +88,8 @@ fun TopSellingScreen(
                         },
                         label = {
                             Text(
-                                text = if (filter == "Custom" && customRange != null) {
-                                    val (start, end) = customRange!!
-                                    val sdf = SimpleDateFormat("MM/dd", Locale.getDefault())
-                                    "${sdf.format(Date(start))} - ${sdf.format(Date(end))}"
+                                text = if (filter == "Custom" && formattedCustomRange != null) {
+                                    formattedCustomRange
                                 } else {
                                     filter
                                 },
@@ -164,6 +169,7 @@ fun DateRangePickerDialog(
     onDateRangeSelected: (Long, Long) -> Unit
 ) {
     val dateRangePickerState = rememberDateRangePickerState()
+    val sdf = remember { SimpleDateFormat("MMM dd, yyyy", Locale.getDefault()) }
     DatePickerDialog(
         onDismissRequest = onDismissRequest,
         confirmButton = {
@@ -206,9 +212,12 @@ fun DateRangePickerDialog(
                         .padding(start = 24.dp, end = 24.dp, bottom = 12.dp),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    val sdf = SimpleDateFormat("MMM dd, yyyy", Locale.getDefault())
-                    val startText = dateRangePickerState.selectedStartDateMillis?.let { sdf.format(Date(it)) } ?: "Start Date"
-                    val endText = dateRangePickerState.selectedEndDateMillis?.let { sdf.format(Date(it)) } ?: "End Date"
+                    val startText = remember(dateRangePickerState.selectedStartDateMillis) {
+                        dateRangePickerState.selectedStartDateMillis?.let { sdf.format(Date(it)) } ?: "Start Date"
+                    }
+                    val endText = remember(dateRangePickerState.selectedEndDateMillis) {
+                        dateRangePickerState.selectedEndDateMillis?.let { sdf.format(Date(it)) } ?: "End Date"
+                    }
                     Text(text = "$startText - $endText", fontSize = 14.sp)
                 }
             },

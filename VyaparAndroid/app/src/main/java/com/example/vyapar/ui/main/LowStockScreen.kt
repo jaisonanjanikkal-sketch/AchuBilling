@@ -25,7 +25,7 @@ fun LowStockScreen(
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.state.collectAsState()
-    val lowStockItems = uiState.lowStockItems.filter { it.stock <= 0.0 }
+    val lowStockItems = uiState.lowStockAlertItems
 
     Scaffold(
         topBar = {

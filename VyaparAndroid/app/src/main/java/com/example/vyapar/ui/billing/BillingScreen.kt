@@ -43,6 +43,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
+@Immutable
 data class BillLineItem(
     val code: String,
     val name: String,
@@ -53,7 +54,9 @@ data class BillLineItem(
 }
 
 class BillingViewModel(private val repository: DataRepository) : ViewModel() {
-    val billItems = mutableStateListOf<BillLineItem>()
+    var billItems by mutableStateOf<List<BillLineItem>>(emptyList())
+        private set
+
     val autocompleteQuery = MutableStateFlow("")
 
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
@@ -77,39 +80,42 @@ class BillingViewModel(private val repository: DataRepository) : ViewModel() {
             val code = existing?.code ?: ("__new__" + System.currentTimeMillis())
 
             // Check if item already in bill list
-            val existingIdx = billItems.indexOfFirst { it.name.lowercase() == name.lowercase() }
+            val listCopy = billItems.toMutableList()
+            val existingIdx = listCopy.indexOfFirst { it.name.lowercase() == name.lowercase() }
             if (existingIdx != -1) {
-                val oldLine = billItems[existingIdx]
-                billItems[existingIdx] = oldLine.copy(quantity = oldLine.quantity + qty, rate = rate)
+                val oldLine = listCopy[existingIdx]
+                listCopy[existingIdx] = oldLine.copy(quantity = oldLine.quantity + qty, rate = rate)
             } else {
-                billItems.add(BillLineItem(code, name, qty, rate))
+                listCopy.add(BillLineItem(code, name, qty, rate))
             }
+            billItems = listCopy
         }
     }
 
     fun removeLineItem(index: Int) {
-        billItems.removeAt(index)
+        val listCopy = billItems.toMutableList()
+        if (index in listCopy.indices) {
+            listCopy.removeAt(index)
+            billItems = listCopy
+        }
     }
 
     var editingTransactionId by mutableStateOf<Long?>(null)
 
     fun startEditing(txn: TransactionWithItems) {
         editingTransactionId = txn.transaction.id
-        billItems.clear()
-        txn.items.forEach { item ->
-            billItems.add(
-                BillLineItem(
-                    code = item.itemCode,
-                    name = item.itemName,
-                    quantity = item.quantity,
-                    rate = item.rate
-                )
+        billItems = txn.items.map { item ->
+            BillLineItem(
+                code = item.itemCode,
+                name = item.itemName,
+                quantity = item.quantity,
+                rate = item.rate
             )
         }
     }
 
     fun clearBill() {
-        billItems.clear()
+        billItems = emptyList()
         editingTransactionId = null
     }
 
@@ -138,10 +144,12 @@ class BillingViewModel(private val repository: DataRepository) : ViewModel() {
         }
 
         val txnId = editingTransactionId
-        if (txnId != null) {
-            repository.updateSale(txnId, transaction.copy(id = txnId), items)
-        } else {
-            repository.insertSale(transaction, items)
+        withContext(Dispatchers.IO) {
+            if (txnId != null) {
+                repository.updateSale(txnId, transaction.copy(id = txnId), items)
+            } else {
+                repository.insertSale(transaction, items)
+            }
         }
 
         // Retrieve the saved transaction with generated ID
@@ -175,7 +183,7 @@ fun BillingScreen(
     val printerManager = remember { ThermalPrinterManager(context) }
 
     val suggestions by viewModel.autocompleteSuggestions.collectAsState()
-    val grandTotal = viewModel.grandTotal
+    val grandTotal by remember { derivedStateOf { viewModel.grandTotal } }
 
     var itemNameInput by remember { mutableStateOf("") }
     var rateInput by remember { mutableStateOf("") }
@@ -358,7 +366,7 @@ fun BillingScreen(
                                 elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
                             ) {
                                 LazyColumn {
-                                    itemsIndexed(suggestions) { _, item ->
+                                    itemsIndexed(suggestions, key = { index, item -> item.code }) { _, item ->
                                         Row(
                                             modifier = Modifier
                                                 .fillMaxWidth()
@@ -474,7 +482,7 @@ fun BillingScreen(
                         .weight(1f)
                         .padding(horizontal = 16.dp)
                 ) {
-                    itemsIndexed(viewModel.billItems) { index, item ->
+                    itemsIndexed(viewModel.billItems, key = { index, item -> item.code }) { index, item ->
                         Card(
                             modifier = Modifier
                                 .fillMaxWidth()

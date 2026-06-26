@@ -1,10 +1,12 @@
 package com.example.vyapar.data
 
+import androidx.compose.runtime.Immutable
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
+@Immutable
 @Entity(tableName = "items")
 data class ItemEntity(
     @PrimaryKey val code: String,
@@ -14,6 +16,7 @@ data class ItemEntity(
     val stock: Double
 )
 
+@Immutable
 @Entity(tableName = "transactions")
 data class TransactionEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0L,
@@ -25,6 +28,7 @@ data class TransactionEntity(
     val isPaid: Boolean = true
 )
 
+@Immutable
 @Entity(
     tableName = "transaction_items",
     foreignKeys = [
@@ -47,12 +51,14 @@ data class TransactionItemEntity(
     val amount: Double
 )
 
+@Immutable
 data class BusinessProfile(
     val name: String,
     val phone: String,
     val address: String
 )
 
+@Immutable
 data class TopSellingItem(
     val itemCode: String,
     val name: String,

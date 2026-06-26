@@ -43,9 +43,11 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.*
 
+@Immutable
 data class HomeStats(
     val todaySales: Double = 0.0,
     val totalItemsSold: Double = 0.0,
@@ -53,56 +55,52 @@ data class HomeStats(
     val lowStockCount: Int = 0
 )
 
+@Immutable
 data class HomeState(
     val stats: HomeStats = HomeStats(),
     val recentTransactions: List<TransactionWithItems> = emptyList()
 )
 
 class HomeViewModel(private val repository: DataRepository) : ViewModel() {
-    private val _state = MutableStateFlow(HomeState())
-    val state: StateFlow<HomeState> = _state.asStateFlow()
+    val state: StateFlow<HomeState> = combine(
+        repository.getTransactionsFlow(),
+        repository.getItemsFlow(),
+        repository.getLowStockItemsFlow()
+    ) { txns, items, lowStock ->
+        // Today's Sales calculation
+        val todayStart = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        val todaySales = txns.filter { it.transaction.date >= todayStart }.sumOf { it.transaction.grandTotal }
 
-    init {
-        viewModelScope.launch(Dispatchers.IO) {
-            combine(
-                repository.getTransactionsFlow(),
-                repository.getItemsFlow(),
-                repository.getLowStockItemsFlow()
-            ) { txns, items, lowStock ->
-                // Today's Sales calculation
-                val todayStart = Calendar.getInstance().apply {
-                    set(Calendar.HOUR_OF_DAY, 0)
-                    set(Calendar.MINUTE, 0)
-                    set(Calendar.SECOND, 0)
-                    set(Calendar.MILLISECOND, 0)
-                }.timeInMillis
-                val todaySales = txns.filter { it.transaction.date >= todayStart }.sumOf { it.transaction.grandTotal }
+        // Total items sold (sum of quantity of all items in all sales)
+        val totalItemsSold = txns.sumOf { it.items.sumOf { item -> item.quantity } }
 
-                // Total items sold (sum of quantity of all items in all sales)
-                val totalItemsSold = txns.sumOf { it.items.sumOf { item -> item.quantity } }
+        // Total Invoices
+        val totalTransactions = txns.size
 
-                // Total Invoices
-                val totalTransactions = txns.size
+        // Low stock count (items with stock <= 5)
+        val lowStockCount = items.filter { it.stock <= 5 }.size
 
-                // Low stock count (items with stock <= 5)
-                val lowStockCount = items.filter { it.stock <= 5 }.size
-
-                HomeState(
-                    stats = HomeStats(todaySales, totalItemsSold, totalTransactions, lowStockCount),
-                    recentTransactions = txns.take(5)
-                )
-            }.collect {
-                _state.value = it
-            }
-        }
+        HomeState(
+            stats = HomeStats(todaySales, totalItemsSold, totalTransactions, lowStockCount),
+            recentTransactions = txns.take(5)
+        )
     }
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), HomeState())
 
     fun getBusinessProfile(): BusinessProfile = repository.getBusinessProfile()
     fun getSelectedPrinterAddress(): String? = repository.getSelectedPrinterAddress()
 
     fun deleteTransaction(id: Long) {
-        viewModelScope.launch(Dispatchers.IO) {
-            repository.deleteTransaction(id)
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                repository.deleteTransaction(id)
+            }
         }
     }
 }

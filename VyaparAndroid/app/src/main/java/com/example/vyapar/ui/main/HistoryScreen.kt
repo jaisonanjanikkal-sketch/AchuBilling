@@ -36,6 +36,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -62,7 +63,9 @@ class HistoryViewModel(private val repository: DataRepository) : ViewModel() {
 
     fun deleteTransaction(id: Long) {
         viewModelScope.launch {
-            repository.deleteTransaction(id)
+            withContext(Dispatchers.IO) {
+                repository.deleteTransaction(id)
+            }
         }
     }
 
@@ -78,6 +81,7 @@ fun HistoryScreen(
     val txnsList by viewModel.transactionsState.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
     val context = LocalContext.current
+    val detailSdf = remember { SimpleDateFormat("dd-MMM-yyyy hh:mm a", Locale.getDefault()) }
 
     var selectedTxn by remember { mutableStateOf<TransactionWithItems?>(null) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
@@ -175,8 +179,7 @@ fun HistoryScreen(
                         .fillMaxWidth()
                         .heightIn(max = 350.dp)
                 ) {
-                    val sdf = SimpleDateFormat("dd-MMM-yyyy hh:mm a", Locale.getDefault())
-                    val dateStr = sdf.format(Date(invoice.transaction.date))
+                    val dateStr = detailSdf.format(Date(invoice.transaction.date))
                     
                     Text("Date: $dateStr", fontSize = 13.sp, color = Color.Gray)
                     Text("Payment: Cash (Paid in Full)", fontSize = 13.sp, color = Color.Gray)
@@ -197,7 +200,7 @@ fun HistoryScreen(
                     Spacer(modifier = Modifier.height(8.dp))
 
                     LazyColumn(modifier = Modifier.weight(1f)) {
-                        items(invoice.items) { item ->
+                        items(invoice.items, key = { it.id }) { item ->
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -349,8 +352,8 @@ fun TransactionListItem(
             }
             Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
-                val sdf = SimpleDateFormat("dd-MMM-yyyy, hh:mm a", Locale.getDefault())
-                val timeStr = sdf.format(Date(txn.transaction.date))
+                val sdf = remember { SimpleDateFormat("dd-MMM-yyyy, hh:mm a", Locale.getDefault()) }
+                val timeStr = remember(txn.transaction.date) { sdf.format(Date(txn.transaction.date)) }
                 Text(text = "Cash Sale", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
                 Text(
                     text = "$timeStr · ${txn.items.size} item${if (txn.items.size != 1) "s" else ""}",
