@@ -50,10 +50,10 @@ fun MainNavigation() {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route ?: "home"
 
-    // Hide bottom navigation on billing screen to optimize screen estate
-    val showBottomNav = currentRoute != "billing"
+    // Hide bottom navigation on billing and settings detailed screens to optimize screen estate
+    val showBottomNav = currentRoute != "billing" && currentRoute != "settings_business" && currentRoute != "settings_printer" && currentRoute != "settings_data"
 
-    // Hide main top bar on detailed analytics sub-screens to let them display their own back-navigation headers
+    // Hide main top bar on detailed analytics and settings sub-screens to let them display their own back-navigation headers
     val showMainTopBar = showBottomNav && currentRoute != "low_stock" && currentRoute != "top_selling" && currentRoute != "all_transactions"
 
     // Only show main FAB on Home, Dashboard, and detailed screens to avoid double-FAB stacking on items/settings screen
@@ -232,7 +232,28 @@ fun MainNavigation() {
             }
             composable("menu") {
                 SettingsScreen(
-                    viewModel = settingsViewModel
+                    viewModel = settingsViewModel,
+                    onNavigateToBusiness = { navController.navigate("settings_business") },
+                    onNavigateToPrinter = { navController.navigate("settings_printer") },
+                    onNavigateToData = { navController.navigate("settings_data") }
+                )
+            }
+            composable("settings_business") {
+                SettingsBusinessScreen(
+                    viewModel = settingsViewModel,
+                    onBackClick = { navController.navigateUp() }
+                )
+            }
+            composable("settings_printer") {
+                SettingsPrinterScreen(
+                    viewModel = settingsViewModel,
+                    onBackClick = { navController.navigateUp() }
+                )
+            }
+            composable("settings_data") {
+                SettingsDataScreen(
+                    viewModel = settingsViewModel,
+                    onBackClick = { navController.navigateUp() }
                 )
             }
             composable("billing") {

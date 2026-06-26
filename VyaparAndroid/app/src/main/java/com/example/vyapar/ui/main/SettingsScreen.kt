@@ -294,351 +294,100 @@ class SettingsViewModel(private val repository: DataRepository) : ViewModel() {
     }
 }
 
-@SuppressLint("MissingPermission")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     viewModel: SettingsViewModel,
+    onNavigateToBusiness: () -> Unit,
+    onNavigateToPrinter: () -> Unit,
+    onNavigateToData: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val context = LocalContext.current
-    val printerManager = remember { ThermalPrinterManager(context) }
-
-    val permissionsLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestMultiplePermissions()
-    ) { _ -> }
-
-    val importLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
-    ) { uri ->
-        if (uri != null) {
-            viewModel.importBackup(context, uri) { success, message ->
-                Toast.makeText(context, message, Toast.LENGTH_LONG).show()
-            }
-        }
-    }
-
-    val businessProfile = remember { viewModel.getBusinessProfile() }
-    var bizName by remember { mutableStateOf(businessProfile.name) }
-    var bizPhone by remember { mutableStateOf(businessProfile.phone) }
-    var bizAddress by remember { mutableStateOf(businessProfile.address) }
-
-    var selectedPrinterMac by remember { mutableStateOf(viewModel.getSelectedPrinterAddress() ?: "") }
-    var bleDevices by remember { mutableStateOf(emptyList<BleScanResultItem>()) }
-    var isScanning by remember { mutableStateOf(false) }
-
-    var showResetConfirm by remember { mutableStateOf(false) }
-
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
-            .background(Color(0xFFF8FAFC)),
+            .background(Color(0xFFF1F5F9)),
         contentPadding = PaddingValues(16.dp, bottom = 80.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // Section: Business Profile
         item {
-            Text("Business Profile", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF1E293B))
-            Spacer(modifier = Modifier.height(8.dp))
-            Card(
-                shape = RoundedCornerShape(12.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    OutlinedTextField(
-                        value = bizName,
-                        onValueChange = { bizName = it },
-                        label = { Text("Business Name") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
-                    )
-                    Spacer(modifier = Modifier.height(10.dp))
-                    OutlinedTextField(
-                        value = bizPhone,
-                        onValueChange = { bizPhone = it },
-                        label = { Text("Phone Number") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
-                    )
-                    Spacer(modifier = Modifier.height(10.dp))
-                    OutlinedTextField(
-                        value = bizAddress,
-                        onValueChange = { bizAddress = it },
-                        label = { Text("Business Address") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Spacer(modifier = Modifier.height(14.dp))
-                    Button(
-                        onClick = {
-                            viewModel.saveBusinessProfile(BusinessProfile(bizName.trim(), bizPhone.trim(), bizAddress.trim()))
-                            Toast.makeText(context, "Business Profile Saved!", Toast.LENGTH_SHORT).show()
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Text("Save Profile", fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-        }
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                SettingsMenuCard(
+                    title = "Business Profile",
+                    subtitle = "Manage name, phone, and billing address",
+                    icon = "🏢",
+                    onClick = onNavigateToBusiness
+                )
 
-        // Section: BLE Thermal Printer Setup
-        item {
-            Text("BLE Thermal Printer", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF1E293B))
-            Spacer(modifier = Modifier.height(8.dp))
-            Card(
-                shape = RoundedCornerShape(12.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    if (!printerManager.isBluetoothSupported()) {
-                        Text("Bluetooth is not supported on this device.", color = Color(0xFFEF4444), fontSize = 13.sp)
-                    } else if (!printerManager.isBluetoothEnabled()) {
-                        Text("Please enable Bluetooth on your phone to connect the printer.", color = Color(0xFFD97706), fontSize = 13.sp)
-                    } else if (!printerManager.hasBluetoothPermission()) {
-                        Column {
-                            Text("Bluetooth & Location permissions are required for scanning.", color = Color(0xFFEF4444), fontSize = 13.sp)
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Button(
-                                onClick = {
-                                    val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                                        arrayOf(
-                                            android.Manifest.permission.BLUETOOTH_SCAN,
-                                            android.Manifest.permission.BLUETOOTH_CONNECT,
-                                            android.Manifest.permission.ACCESS_FINE_LOCATION,
-                                            android.Manifest.permission.ACCESS_COARSE_LOCATION
-                                        )
-                                    } else {
-                                        arrayOf(
-                                            android.Manifest.permission.ACCESS_FINE_LOCATION,
-                                            android.Manifest.permission.ACCESS_COARSE_LOCATION
-                                        )
-                                    }
-                                    permissionsLauncher.launch(permissions)
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Text("Grant Permissions", fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    } else if (!printerManager.isLocationServiceEnabled()) {
-                        Column {
-                            Text("Location services (GPS) must be turned ON to scan for BLE printers.", color = Color(0xFFD97706), fontSize = 13.sp)
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Button(
-                                onClick = {
-                                    val intent = Intent(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS)
-                                    context.startActivity(intent)
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Text("Turn On Location", fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    } else {
-                        // Current selection display
-                        if (selectedPrinterMac.isNotBlank()) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(Color(0xFFDBEAFE), RoundedCornerShape(8.dp))
-                                    .padding(12.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text("Selected Printer", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF1E293B))
-                                    Text(selectedPrinterMac, fontSize = 11.sp, color = Color(0xFF64748B))
-                                    Text("✅ Connected", color = Color(0xFF16A34A), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                }
-                                Button(
-                                    onClick = {
-                                        printerManager.disconnect()
-                                        selectedPrinterMac = ""
-                                        viewModel.saveSelectedPrinterAddress(null)
-                                        Toast.makeText(context, "Printer Disconnected", Toast.LENGTH_SHORT).show()
-                                    },
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444)),
-                                    shape = RoundedCornerShape(6.dp),
-                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                    modifier = Modifier.height(32.dp)
-                                ) {
-                                    Text("Disconnect", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                }
-                            }
-                            Spacer(modifier = Modifier.height(10.dp))
-                        }
+                SettingsMenuCard(
+                    title = "Bluetooth / Printer Settings",
+                    subtitle = "Pair and setup BLE thermal printer",
+                    icon = "🖨️",
+                    onClick = onNavigateToPrinter
+                )
 
-                        // Scan button
-                        Button(
-                            onClick = {
-                                if (!isScanning) {
-                                    isScanning = true
-                                    bleDevices = emptyList()
-                                    printerManager.scanBleDevices { results ->
-                                        bleDevices = results
-                                        isScanning = false
-                                    }
-                                }
-                            },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (isScanning) Color(0xFF94A3B8) else Color(0xFF2563EB)
-                            ),
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(8.dp),
-                            enabled = !isScanning
-                        ) {
-                            if (isScanning) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(16.dp),
-                                    color = Color.White,
-                                    strokeWidth = 2.dp
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Scanning for BLE printers...", fontWeight = FontWeight.Bold)
-                            } else {
-                                Text("🔍 Scan for BLE Printers", fontWeight = FontWeight.Bold)
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        // Scanned device list
-                        if (bleDevices.isEmpty() && !isScanning) {
-                            Text(
-                                "Turn on your BLE thermal printer (F2C / POS) and tap 'Scan' above.",
-                                fontSize = 12.sp,
-                                color = Color(0xFF94A3B8)
-                            )
-                        } else {
-                            bleDevices.forEach { device ->
-                                val isSelected = device.address == selectedPrinterMac
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .background(
-                                            if (isSelected) Color(0xFFDBEAFE) else Color.Transparent,
-                                            RoundedCornerShape(8.dp)
-                                        )
-                                        .clickable {
-                                            selectedPrinterMac = device.address
-                                            viewModel.saveSelectedPrinterAddress(device.address)
-                                            Toast.makeText(context, "Printer Selected: ${device.name}", Toast.LENGTH_SHORT).show()
-                                        }
-                                        .padding(12.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Column {
-                                        Text(device.name, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF1E293B))
-                                        Text(device.address, fontSize = 11.sp, color = Color.Gray)
-                                    }
-                                    if (isSelected) {
-                                        Text("✅ Selected", color = Color(0xFF2563EB), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Section: Data & Utilities
-        item {
-            Text("Data Management", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF1E293B))
-            Spacer(modifier = Modifier.height(8.dp))
-            Card(
-                shape = RoundedCornerShape(12.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    // Load demo data
-                    Button(
-                        onClick = {
-                            viewModel.loadDemoData()
-                            Toast.makeText(context, "Demo Data Loaded successfully!", Toast.LENGTH_SHORT).show()
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16A34A)),
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Text("📥 Load Demo Data", fontWeight = FontWeight.Bold)
-                    }
-
-                    // Export Backup
-                    Button(
-                        onClick = {
-                            viewModel.exportBackup(context) { success, message ->
-                                if (!success) Toast.makeText(context, message, Toast.LENGTH_LONG).show()
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Text("📤 Export Backup JSON", fontWeight = FontWeight.Bold)
-                    }
-
-                    // Import Backup
-                    Button(
-                        onClick = {
-                            importLauncher.launch(arrayOf("application/json", "*/*"))
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4F46E5)),
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Text("📥 Import Backup JSON", fontWeight = FontWeight.Bold)
-                    }
-
-                    // Reset Data
-                    Button(
-                        onClick = { showResetConfirm = true },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444)),
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Text("🗑️ Reset All App Data", fontWeight = FontWeight.Bold)
-                    }
-                }
+                SettingsMenuCard(
+                    title = "Data Management",
+                    subtitle = "Import/export backups, seed demo data, reset",
+                    icon = "⚙️",
+                    onClick = onNavigateToData
+                )
             }
         }
     }
+}
 
-    if (showResetConfirm) {
-        AlertDialog(
-            onDismissRequest = { showResetConfirm = false },
-            title = { Text("Reset All Data?", fontWeight = FontWeight.Bold) },
-            text = { Text("This will permanently delete all inventory items and transaction billing history. This cannot be undone.") },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        viewModel.clearAllData()
-                        showResetConfirm = false
-                        Toast.makeText(context, "All data has been reset", Toast.LENGTH_SHORT).show()
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444))
-                ) {
-                    Text("Reset")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showResetConfirm = false }) {
-                    Text("Cancel", color = Color(0xFF64748B))
-                }
+@Composable
+fun SettingsMenuCard(
+    title: String,
+    subtitle: String,
+    icon: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable { onClick() },
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .background(Color(0xFFF1F5F9), RoundedCornerShape(8.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(text = icon, fontSize = 20.sp)
             }
-        )
+            Spacer(modifier = Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF0F172A)
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = subtitle,
+                    fontSize = 12.sp,
+                    color = Color(0xFF64748B)
+                )
+            }
+            Text(
+                text = "→",
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF64748B)
+            )
+        }
     }
 }
