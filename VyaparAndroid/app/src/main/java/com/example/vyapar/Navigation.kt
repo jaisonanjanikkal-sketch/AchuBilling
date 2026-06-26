@@ -42,6 +42,7 @@ fun MainNavigation() {
     // Initialize ViewModels manually passing repository for simplicity and reliability
     val homeViewModel: HomeViewModel = viewModel { HomeViewModel(repository) }
     val dashboardViewModel: DashboardViewModel = viewModel { DashboardViewModel(repository) }
+    val topSellingViewModel: TopSellingViewModel = viewModel { TopSellingViewModel(repository) }
     val itemsViewModel: ItemsViewModel = viewModel { ItemsViewModel(repository) }
     val billingViewModel: BillingViewModel = viewModel { BillingViewModel(repository) }
     val historyViewModel: HistoryViewModel = viewModel { HistoryViewModel(repository) }
@@ -211,7 +212,7 @@ fun MainNavigation() {
             }
             composable("top_selling") {
                 TopSellingScreen(
-                    viewModel = dashboardViewModel,
+                    viewModel = topSellingViewModel,
                     onBackClick = { navController.navigateUp() }
                 )
             }

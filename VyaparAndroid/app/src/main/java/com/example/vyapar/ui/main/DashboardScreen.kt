@@ -25,6 +25,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.vyapar.data.DataRepository
 import com.example.vyapar.data.ItemEntity
 import com.example.vyapar.data.TransactionWithItems
+import com.example.vyapar.data.TopSellingItem
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -50,13 +51,6 @@ data class DashboardStats(
     val avgInvoice: Double = 0.0,
     val itemsSold: Double = 0.0,
     val inventoryValue: Double = 0.0
-)
-
-data class TopSellingItem(
-    val itemCode: String,
-    val name: String,
-    val quantitySold: Double,
-    val percent: Int
 )
 
 data class DashboardState(

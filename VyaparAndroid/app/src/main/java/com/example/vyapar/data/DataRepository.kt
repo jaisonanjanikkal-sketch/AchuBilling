@@ -22,6 +22,7 @@ interface DataRepository {
     suspend fun updateSale(transactionId: Long, transaction: TransactionEntity, items: List<TransactionItemEntity>)
     suspend fun deleteTransaction(id: Long)
     suspend fun clearAllData()
+    suspend fun getTopSellingItems(startDate: Long, endDate: Long): List<TopSellingItem>
 
     // Business Profile & Settings
     fun getBusinessProfile(): BusinessProfile
@@ -164,6 +165,20 @@ class DefaultDataRepository(private val context: Context) : DataRepository {
         db.withTransaction {
             transactionDao.deleteAllTransactions()
             itemDao.deleteAllItems()
+        }
+    }
+
+    override suspend fun getTopSellingItems(startDate: Long, endDate: Long): List<TopSellingItem> {
+        val queryResults = transactionDao.getTopSellingItemsInRange(startDate, endDate)
+        val maxQty = queryResults.firstOrNull()?.totalQuantity ?: 1.0
+        return queryResults.map { result ->
+            val pct = ((result.totalQuantity / maxQty) * 100).toInt()
+            TopSellingItem(
+                itemCode = result.itemCode,
+                name = result.itemName,
+                quantitySold = result.totalQuantity,
+                percent = pct
+            )
         }
     }
 

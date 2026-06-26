@@ -52,3 +52,10 @@ data class BusinessProfile(
     val phone: String,
     val address: String
 )
+
+data class TopSellingItem(
+    val itemCode: String,
+    val name: String,
+    val quantitySold: Double,
+    val percent: Int
+)
