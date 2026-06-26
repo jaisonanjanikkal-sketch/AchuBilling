@@ -53,12 +53,15 @@ fun MainNavigation() {
     // Hide bottom navigation on billing screen to optimize screen estate
     val showBottomNav = currentRoute != "billing"
 
-    // Only show main FAB on Home and Dashboard to avoid double-FAB stacking on items/settings screen
-    val showMainFab = currentRoute == "home" || currentRoute == "dashboard"
+    // Hide main top bar on detailed analytics sub-screens to let them display their own back-navigation headers
+    val showMainTopBar = showBottomNav && currentRoute != "low_stock" && currentRoute != "top_selling" && currentRoute != "all_transactions"
+
+    // Only show main FAB on Home, Dashboard, and detailed screens to avoid double-FAB stacking on items/settings screen
+    val showMainFab = currentRoute == "home" || currentRoute == "dashboard" || currentRoute == "low_stock" || currentRoute == "top_selling" || currentRoute == "all_transactions"
 
     Scaffold(
         topBar = {
-            if (showBottomNav) {
+            if (showMainTopBar) {
                 TopAppBar(
                     title = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -189,10 +192,37 @@ fun MainNavigation() {
                         billingViewModel.clearBill()
                         navController.navigate("billing")
                     },
+                    onNavigateToLowStock = {
+                        navController.navigate("low_stock")
+                    },
+                    onNavigateToTopSelling = {
+                        navController.navigate("top_selling")
+                    },
+                    onNavigateToAllTransactions = {
+                        navController.navigate("all_transactions")
+                    }
+                )
+            }
+            composable("low_stock") {
+                LowStockScreen(
+                    viewModel = dashboardViewModel,
+                    onBackClick = { navController.navigateUp() }
+                )
+            }
+            composable("top_selling") {
+                TopSellingScreen(
+                    viewModel = dashboardViewModel,
+                    onBackClick = { navController.navigateUp() }
+                )
+            }
+            composable("all_transactions") {
+                TransactionsScreen(
+                    viewModel = dashboardViewModel,
                     onEditTransaction = { txn ->
                         billingViewModel.startEditing(txn)
                         navController.navigate("billing")
-                    }
+                    },
+                    onBackClick = { navController.navigateUp() }
                 )
             }
             composable("items") {

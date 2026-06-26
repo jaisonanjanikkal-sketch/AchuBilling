@@ -86,7 +86,6 @@ class DashboardViewModel(private val repository: DataRepository) : ViewModel() {
         }
         val topItemsSorted = salesMap.entries
             .sortedByDescending { it.value }
-            .take(5)
         val maxQty = topItemsSorted.firstOrNull()?.value ?: 1.0
         val topSelling = topItemsSorted.map { entry ->
             val item = items.find { it.code == entry.key }
@@ -97,7 +96,7 @@ class DashboardViewModel(private val repository: DataRepository) : ViewModel() {
 
         DashboardState(
             stats = DashboardStats(totalRevenue, avgInvoice, itemsSold, inventoryValue),
-            lowStockItems = lowStock.take(5),
+            lowStockItems = lowStock,
             topSellingItems = topSelling,
             recentTransactions = txns // Fetch all transactions to match React dashboard
         )
@@ -120,39 +119,12 @@ class DashboardViewModel(private val repository: DataRepository) : ViewModel() {
 fun DashboardScreen(
     viewModel: DashboardViewModel,
     onNavigateToBilling: () -> Unit,
-    onEditTransaction: (TransactionWithItems) -> Unit,
+    onNavigateToLowStock: () -> Unit,
+    onNavigateToTopSelling: () -> Unit,
+    onNavigateToAllTransactions: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.state.collectAsState()
-    val context = LocalContext.current
-    val printerManager = remember { ThermalPrinterManager(context) }
-    var selectedTxnForDelete by remember { mutableStateOf<Long?>(null) }
-
-    if (selectedTxnForDelete != null) {
-        AlertDialog(
-            onDismissRequest = { selectedTxnForDelete = null },
-            title = { Text("Delete Transaction?") },
-            text = { Text("Are you sure you want to delete invoice #${selectedTxnForDelete}? This will also revert the item stocks.") },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        selectedTxnForDelete?.let { viewModel.deleteTransaction(it) }
-                        selectedTxnForDelete = null
-                        Toast.makeText(context, "Transaction deleted", Toast.LENGTH_SHORT).show()
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626))
-                ) {
-                    Text("Delete")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { selectedTxnForDelete = null }) {
-                    Text("Cancel")
-                }
-            }
-        )
-    }
-
     Box(modifier = modifier.fillMaxSize()) {
         LazyColumn(
             modifier = Modifier
@@ -225,91 +197,44 @@ fun DashboardScreen(
                 }
             }
 
-            // Low Stock Section
-            if (uiState.lowStockItems.isNotEmpty()) {
-                item {
-                    SectionHeader(title = "Low Stock Alerts")
-                }
-                item {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        uiState.lowStockItems.forEach { item ->
-                            LowStockCard(item)
-                        }
-                    }
-                }
-            }
-
-            // Top Selling Items Section
-            if (uiState.topSellingItems.isNotEmpty()) {
-                item {
-                    SectionHeader(title = "Top Selling Products")
-                }
-                item {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        uiState.topSellingItems.forEach { topItem ->
-                            TopItemCard(topItem)
-                        }
-                    }
-                }
-            }
-
-            // Recent Transactions Section
+            // Dashboard Navigation Cards Section
             item {
-                SectionHeader(title = "All Transactions")
-            }
-            if (uiState.recentTransactions.isEmpty()) {
-                item {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 30.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "No sales recorded yet.",
-                            color = Color(0xFF94A3B8),
-                            fontSize = 14.sp
-                        )
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    val lowStockCount = uiState.lowStockItems.filter { it.stock <= 0 }.size
+                    val lowStockSummary = if (lowStockCount == 0) {
+                        "All items have healthy stock levels"
+                    } else {
+                        "$lowStockCount items needing attention"
                     }
-                }
-            } else {
-                items(uiState.recentTransactions, key = { it.transaction.id }) { txn ->
-                    TransactionUiCard(
-                        txn = txn,
-                        onPrint = {
-                            val printerMac = viewModel.getSelectedPrinterAddress()
-                            if (printerMac.isNullOrBlank()) {
-                                Toast.makeText(context, "Printer not connected. Go to Settings to link printer.", Toast.LENGTH_SHORT).show()
-                            } else if (!printerManager.hasBluetoothPermission()) {
-                                Toast.makeText(context, "Bluetooth permissions are required for printing.", Toast.LENGTH_LONG).show()
-                            } else {
-                                Toast.makeText(context, "Connecting to printer...", Toast.LENGTH_SHORT).show()
-                                viewModel.viewModelScope.launch {
-                                    val printResult = printerManager.printInvoice(printerMac, viewModel.getBusinessProfile(), txn)
-                                    if (printResult.isSuccess) {
-                                        Toast.makeText(context, "Printed successfully!", Toast.LENGTH_SHORT).show()
-                                    } else {
-                                        Toast.makeText(context, "Print failed: ${printResult.exceptionOrNull()?.message}", Toast.LENGTH_LONG).show()
-                                    }
-                                }
-                            }
-                        },
-                        onShare = {
-                            val profile = viewModel.getBusinessProfile()
-                            val dialogOptions = arrayOf("Share as PNG Image", "Share as PDF Document")
-                            android.app.AlertDialog.Builder(context)
-                                .setTitle("Share Invoice #${txn.transaction.id}")
-                                .setItems(dialogOptions) { _, which ->
-                                    if (which == 0) {
-                                        InvoiceShareUtility.shareInvoiceAsImage(context, profile, txn)
-                                    } else {
-                                        InvoiceShareUtility.shareInvoiceAsPdf(context, profile, txn)
-                                    }
-                                }
-                                .show()
-                        },
-                        onEdit = { onEditTransaction(txn) },
-                        onDelete = { selectedTxnForDelete = txn.transaction.id }
+                    DashboardMenuCard(
+                        title = "Low Stock Alerts",
+                        subtitle = lowStockSummary,
+                        icon = "⚠️",
+                        iconBgColor = Color(0xFFFEE2E2),
+                        iconColor = Color(0xFFDC2626),
+                        onClick = onNavigateToLowStock
+                    )
+
+                    val topSellingCount = uiState.topSellingItems.size
+                    val topSellingSummary = "$topSellingCount products with sales"
+                    DashboardMenuCard(
+                        title = "Top Selling Products",
+                        subtitle = topSellingSummary,
+                        icon = "📈",
+                        iconBgColor = Color(0xFFDBEAFE),
+                        iconColor = Color(0xFF2563EB),
+                        onClick = onNavigateToTopSelling
+                    )
+
+                    val txnCount = uiState.recentTransactions.size
+                    val txnSummary = "$txnCount invoices recorded"
+                    DashboardMenuCard(
+                        title = "All Transactions",
+                        subtitle = txnSummary,
+                        icon = "🧾",
+                        iconBgColor = Color(0xFFDCFCE7),
+                        iconColor = Color(0xFF16A34A),
+                        onClick = onNavigateToAllTransactions
                     )
                 }
             }
@@ -518,4 +443,61 @@ fun formatCurrency(amount: Double): String {
 
 fun formatQuantity(qty: Double): String {
     return if (qty % 1.0 == 0.0) qty.toInt().toString() else String.format("%.2f", qty)
+}
+
+@Composable
+fun DashboardMenuCard(
+    title: String,
+    subtitle: String,
+    icon: String,
+    iconBgColor: Color,
+    iconColor: Color,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable { onClick() },
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .background(iconBgColor, CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(text = icon, fontSize = 20.sp, color = iconColor)
+            }
+            Spacer(modifier = Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF0F172A)
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = subtitle,
+                    fontSize = 12.sp,
+                    color = Color(0xFF64748B)
+                )
+            }
+            Text(
+                text = "→",
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF64748B)
+            )
+        }
+    }
 }
